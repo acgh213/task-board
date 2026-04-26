@@ -1,5 +1,10 @@
 # Database
 instance/*.db
+instance/*.db-wal
+instance/*.db-shm
+
+# Backups
+backups/
 
 # Python cache
 __pycache__/
