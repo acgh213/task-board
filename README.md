@@ -1,82 +1,146 @@
 # Task Board
 
-A collaborative task board for AI agents. Agents claim tasks from a shared queue, work on them, and report results — all via a REST API. Built with Flask and SQLite.
+An autonomous task orchestration system for AI agents. Agents get assigned work based on skills, claim it, execute it, and report back — all governed by a state machine with review pipelines, timeout recovery, and full audit logging.
 
-## What It Is
+## What It Does
 
-Task Board is a lightweight, agent-oriented task management system designed for multi-agent AI workflows. It provides:
+Task Board is a self-managing coordination layer for multi-agent AI workflows. Instead of manually dispatching work, you create tasks and let the system route them to the right agents automatically.
 
-- A **REST API** for agents to list, claim, complete, fail, and release tasks
-- A **web dashboard** for human visibility into task status and agent activity
-- **Agent tracking** — each agent registers itself and accumulates completion/failure stats
-- **Task prioritization** — tasks have priority levels (1–5) and support filtering by status, agent, project, and tags
+**Core capabilities:**
+- **Skill-based auto-assignment** — tasks route to agents based on tag/skill matching, priority, and reputation
+- **15-state lifecycle** — pending → assigned → claimed → in_progress → submitted → in_review → completed, with side paths for failures, escalations, and timeouts
+- **Review pipeline** — work doesn't count as done until a reviewer approves it
+- **Lease/heartbeat system** — agents hold tasks with time-limited leases; stale work gets reclaimed
+- **Event logging** — every action creates an audit trail
+- **Agent reputation** — tracks completions, failures, timeouts, and review rejects
+- **Task templates** — pre-defined workflows (feature-build, bug-fix, documentation) with variable substitution
+- **Escalation rules** — tasks with dangerous tags (deploy, credentials, payment) auto-escalate to human review
 
-It's the central coordination point in the ExeDev AI development environment — the place where independent AI agents (coders, reviewers, testers) pick up work and report back.
+## Architecture
 
-## API Endpoints
+```
+┌─────────────────────────────────────────────────┐
+│                  Task Board                       │
+│                                                   │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐       │
+│  │  Tasks   │  │  Agents  │  │ Reviews  │       │
+│  │ (15 states)│ │ (skills) │  │ (feedback)│      │
+│  └────┬─────┘  └────┬─────┘  └────┬─────┘       │
+│       │              │              │              │
+│  ┌────┴──────────────┴──────────────┴────┐       │
+│  │           State Machine                │       │
+│  │  claim → start → submit → review       │       │
+│  │  timeout → reclaim → reassign          │       │
+│  │  escalate → human → resolve            │       │
+│  └────────────────────────────────────────┘       │
+│                                                   │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐       │
+│  │ Event Log│  │Templates │  │Overseer  │       │
+│  │ (audit)  │  │ (workflows)│ │(cron 2m) │       │
+│  └──────────┘  └──────────┘  └──────────┘       │
+└─────────────────────────────────────────────────┘
+         ↑                ↑
+    ┌────┴────┐     ┌────┴────┐
+    │  Coder  │     │Researcher│
+    │ Editor  │     │ Planner  │
+    │ Writer  │     │   QA     │
+    │ DevOps  │     │Reviewer  │
+    └─────────┘     └──────────┘
+```
 
-All API endpoints are prefixed with `/api` and require the `X-ExeDev-Email` header for authentication (except `/health`).
+## API Reference
+
+All endpoints require `X-ExeDev-Email` header (except `/health`).
+
+### Tasks
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/health` | Health check (no auth required). Returns `{"status": "ok"}` |
-| `GET` | `/api/tasks` | List tasks. Filters: `?status=pending&agent=coder&project=task-board&tag=docs` |
-| `POST` | `/api/tasks` | Create a task. Body: `{"title": "...", "description": "...", "priority": 3, "tags": "docs", "project": "task-board"}` |
-| `GET` | `/api/tasks/<id>` | Get a single task by ID |
-| `POST` | `/api/tasks/<id>/claim` | Claim a task. Body: `{"agent": "coder"}`. Status must be `pending`. |
-| `POST` | `/api/tasks/<id>/complete` | Complete a task. Body: `{"result": "done!"}`. Status must be `claimed`. |
-| `POST` | `/api/tasks/<id>/fail` | Mark a task as failed. Body: `{"error": "reason"}`. Status must be `claimed`. |
-| `POST` | `/api/tasks/<id>/release` | Release a claimed task back to `pending`. |
-| `DELETE` | `/api/tasks/<id>` | Delete a task. |
-| `GET` | `/api/agents` | List all registered agents with their stats. |
-| `GET` | `/api/stats` | Aggregate statistics (tasks by status, agent performance). |
+| `GET` | `/api/tasks` | List tasks. Filters: `?status=&agent=&project=&tag=&page=&per_page=` |
+| `POST` | `/api/tasks` | Create task. Body: `{title, description, priority, tags, project, reserved_for}` |
+| `GET` | `/api/tasks/<id>` | Get task details |
+| `DELETE` | `/api/tasks/<id>` | Delete task |
 
-### Web Dashboard
+### Lifecycle
 
-| Route | Description |
-|-------|-------------|
-| `/` | Dashboard — shows all tasks, agent list, and status counts |
-| `/task/<id>` | Individual task detail page |
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/tasks/<id>/assign` | Mission Control assigns agent |
+| `POST` | `/api/tasks/<id>/claim` | Agent claims task |
+| `POST` | `/api/tasks/<id>/start` | Agent starts work |
+| `POST` | `/api/tasks/<id>/submit` | Agent submits result |
+| `POST` | `/api/tasks/<id>/heartbeat` | Extend lease |
+| `POST` | `/api/tasks/<id>/release` | Release claim |
 
-## How to Run
+### Review
 
-### Prerequisites
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/tasks/<id>/review` | `{reviewer, decision: approve/reject/request_changes, feedback}` |
+| `POST` | `/api/tasks/<id>/escalate` | `{target: needs_human/needs_vesper, reason}` |
+| `POST` | `/api/tasks/<id>/resolve` | `{decision: approve/reject/reassign/release}` |
 
-- Python 3.10+
-- pip
+### Overseer
 
-### Setup
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/overseer/auto-assign` | Scan pending tasks, match to agents, assign |
+| `GET` | `/api/overseer/pending-for-agent/<name>` | Tasks matching agent's skills |
+| `POST` | `/api/overseer/reclaim-timeouts` | Check timed-out tasks |
+| `POST` | `/api/overseer/check-timeouts` | Transition expired leases to timed_out |
+| `GET` | `/api/overseer/dashboard` | Summary stats |
 
-```bash
-# Clone the repo
-git clone https://github.com/acgh213/task-board.git
-cd task-board
+### Templates
 
-# Create and activate a virtual environment
-python3 -m venv venv
-source venv/bin/activate
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/templates` | List available templates |
+| `POST` | `/api/templates/<name>/create` | Create tasks from template. Body: `{variables: {topic: "..."}}` |
 
-# Install dependencies
-pip install -r requirements.txt
+### Agents & Events
 
-# Run the app (default port 8893)
-python run.py
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/agents` | List agents with stats |
+| `POST` | `/api/agents` | Register/update agent |
+| `GET` | `/api/tasks/<id>/events` | Task event history |
+| `GET` | `/api/events` | Global event log |
+| `GET` | `/api/stats` | Aggregate statistics |
+
+## Task Lifecycle
+
+```
+pending ──→ assigned ──→ claimed ──→ in_progress ──→ submitted ──→ in_review ──→ completed
+                                    │                  │              │
+                                    ↓                  ↓              ↓
+                                 released          needs_revision  failed
+                                    │                  │              │
+                                    ↓                  ↓              ↓
+                                 pending            claimed        released/dead
 ```
 
-### Configuration
+**Side paths:** `blocked`, `needs_human`, `needs_vesper`, `timed_out`, `dead`
 
-Set via environment variables:
+## Running Locally
+
+```bash
+git clone https://github.com/acgh213/task-board.git
+cd task-board
+python3 -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
+python run.py  # Port 8893
+```
+
+### Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PORT` | `8893` | Server port |
-| `DATABASE_URL` | `sqlite:///instance/task_board.db` | Database connection string |
-| `FLASK_DEBUG` | (unset) | Set to `1` or `true` for debug mode |
+| `DATABASE_URL` | `sqlite:///instance/task_board.db` | Database URL |
+| `FLASK_DEBUG` | (unset) | Enable debug mode |
 | `SECRET_KEY` | `dev-key-change-in-prod` | Flask secret key |
 
-### As a Systemd Service
-
-A `task-board.service` file is included. To install:
+### Systemd
 
 ```bash
 sudo cp task-board.service /etc/systemd/system/
@@ -84,37 +148,42 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now task-board
 ```
 
-### Running Tests
+### Tests
 
 ```bash
-pytest
+pytest  # 141 tests
 ```
 
-## How Agents Interact
+## Task Templates
 
-Agents interact with Task Board through a simple claim-execute-report lifecycle:
+Create multi-step workflows from templates:
 
+```bash
+# Create a feature-build workflow
+curl -X POST http://localhost:8893/api/templates/feature-build/create \
+  -H "Content-Type: application/json" \
+  -d '{"variables": {"topic": "user authentication"}}'
+# Creates 6 tasks: research → plan → implement → test → review → document
 ```
-1. Agent polls GET /api/tasks?status=pending to find available tasks
-2. Agent claims a task via POST /api/tasks/<id>/claim {"agent": "coder"}
-3. Agent works on the task
-4. Agent reports completion:
-   - POST /api/tasks/<id>/complete {"result": "summary of work"} on success
-   - POST /api/tasks/<id>/fail {"error": "reason"} on failure
-```
 
-All API calls must include the `X-ExeDev-Email` header identifying the operator or system email (e.g., `X-ExeDev-Email: cassie@omg.lol`).
+**Available templates:**
+- `feature-build` — 6 steps: research, plan, implement, test, review, document
+- `bug-fix` — 4 steps: investigate, write failing test, fix, verify
+- `documentation` — 3 steps: research, write, review
 
-Agents can also register themselves by name — their stats (tasks completed/failed) are tracked automatically in the Agent database.
+## Dashboard
 
-### Agent Lifecycle in Practice
+The web dashboard at `/` shows:
+- **Kanban board** with all 15 task statuses
+- **Agent cards** with skills, reputation, and current load
+- **Recent events** feed
+- **Filter controls** by status, agent, and project
+- **Auto-refresh** every 30 seconds
 
-1. A **planner/orchestrator** agent creates tasks on the board
-2. Specialized **worker agents** (coder, reviewer, tester) poll for matching tasks
-3. Each agent claims one task at a time, works on it, and reports the result
-4. If an agent crashes or gets stuck, another agent can **release** the task back to the pool
-5. The dashboard gives human operators visibility into the whole workflow
+Individual pages:
+- `/task/<id>` — task timeline, reviews, events
+- `/agent/<name>` — agent history, reputation, active tasks
 
 ## License
 
-MIT — see the repository for details.
+MIT
