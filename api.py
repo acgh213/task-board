@@ -969,8 +969,16 @@ def review_task(task_id):
     if task.status not in ('in_review', 'assigned'):
         return jsonify({'error': f'Task is in status {task.status}, must be in_review or assigned to review'}), 409
 
-    # No self-review
-    if reviewer == task.claimed_by:
+    # No self-review: determine who did the work
+    worker = task.claimed_by
+    if not worker and task.status == 'assigned':
+        # Reviewer handoff path: claimed_by was cleared, find previous worker from events
+        last_worker_event = EventLog.query.filter_by(task_id=task.id).filter(
+            EventLog.event_type.in_(['claimed', 'submitted']),
+            EventLog.agent.isnot(None),
+        ).order_by(EventLog.id.desc()).first()
+        worker = last_worker_event.agent if last_worker_event else None
+    if worker and reviewer == worker:
         return jsonify({'error': 'Reviewer cannot be the same agent who worked on the task'}), 409
 
     # Create review record
@@ -983,9 +991,6 @@ def review_task(task_id):
     db.session.add(review)
 
     now = datetime.now(timezone.utc)
-    rev_agent = db.session.get(Agent, reviewer)
-    if rev_agent:
-        rev_agent.last_heartbeat = now
 
     if decision == 'approve':
         ok, err = _validate_transition(task, 'completed')
@@ -1054,6 +1059,11 @@ def review_task(task_id):
         task.status = 'needs_revision'
         task.last_error = feedback or 'Changes requested by reviewer'
 
+        # Update worker agent status — they need to pick up the revision
+        worker = db.session.get(Agent, task.claimed_by) if task.claimed_by else None
+        if worker:
+            worker.status = 'idle'
+
         _log_event(task.id, 'reviewed', agent=reviewer, details={
             'decision': 'request_changes',
             'feedback': feedback,
@@ -1061,6 +1071,8 @@ def review_task(task_id):
         })
 
     task.updated_at = now
+    # Sync reviewer agent status (busy if still has active tasks, idle otherwise)
+    _sync_agent_status(reviewer, now)
     db.session.commit()
     _emit_task_update(task)
     # Emit agent updates if workers were affected
