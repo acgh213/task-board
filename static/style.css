@@ -1,0 +1,428 @@
+/* Task Board — Dark Theme CSS */
+
+:root {
+    --bg-primary: #0d1117;
+    --bg-secondary: #161b22;
+    --bg-card: #1c2128;
+    --bg-hover: #21262d;
+    --border: #30363d;
+    --text-primary: #e6edf3;
+    --text-secondary: #8b949e;
+    --text-muted: #6e7681;
+    --accent: #58a6ff;
+    --accent-hover: #79c0ff;
+
+    --priority-1: #f85149;
+    --priority-2: #d29922;
+    --priority-3: #58a6ff;
+    --priority-4: #8b949e;
+    --priority-5: #484f58;
+
+    --status-pending: #58a6ff;
+    --status-claimed: #d29922;
+    --status-completed: #3fb950;
+    --status-failed: #f85149;
+
+    --card-radius: 8px;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, sans-serif;
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    line-height: 1.6;
+    min-height: 100vh;
+}
+
+/* Navigation */
+.navbar {
+    background-color: var(--bg-secondary);
+    border-bottom: 1px solid var(--border);
+    padding: 0 24px;
+    display: flex;
+    align-items: center;
+    height: 56px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+}
+
+.nav-brand a {
+    color: var(--text-primary);
+    text-decoration: none;
+    font-size: 1.2rem;
+    font-weight: 700;
+}
+
+.nav-links {
+    margin-left: 32px;
+    display: flex;
+    gap: 20px;
+}
+
+.nav-links a {
+    color: var(--text-secondary);
+    text-decoration: none;
+    font-size: 0.9rem;
+    transition: color 0.2s;
+}
+
+.nav-links a:hover {
+    color: var(--text-primary);
+}
+
+/* Container */
+.container {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 24px;
+}
+
+/* Dashboard Header */
+.dashboard-header {
+    margin-bottom: 24px;
+}
+
+.dashboard-header h1 {
+    font-size: 1.8rem;
+    margin-bottom: 16px;
+}
+
+/* Stats Bar */
+.stats-bar {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    margin-bottom: 24px;
+}
+
+.stat-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--card-radius);
+    padding: 20px;
+    text-align: center;
+    border-top: 3px solid var(--text-muted);
+}
+
+.stat-card.pending { border-top-color: var(--status-pending); }
+.stat-card.claimed { border-top-color: var(--status-claimed); }
+.stat-card.completed { border-top-color: var(--status-completed); }
+.stat-card.failed { border-top-color: var(--status-failed); }
+
+.stat-count {
+    display: block;
+    font-size: 2rem;
+    font-weight: 700;
+}
+
+.stat-label {
+    display: block;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-top: 4px;
+}
+
+/* Board Columns */
+.board-columns {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    margin-bottom: 32px;
+}
+
+.column {
+    min-width: 0;
+}
+
+.column-header {
+    font-size: 1rem;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid var(--border);
+}
+
+.column-header.pending { border-bottom-color: var(--status-pending); }
+.column-header.claimed { border-bottom-color: var(--status-claimed); }
+.column-header.completed { border-bottom-color: var(--status-completed); }
+.column-header.failed { border-bottom-color: var(--status-failed); }
+
+/* Task Cards */
+.task-card {
+    display: block;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--card-radius);
+    padding: 12px;
+    margin-bottom: 8px;
+    text-decoration: none;
+    color: var(--text-primary);
+    transition: all 0.2s;
+    border-left: 3px solid var(--text-muted);
+}
+
+.task-card:hover {
+    background: var(--bg-hover);
+    border-color: var(--accent);
+    transform: translateY(-1px);
+}
+
+.task-card.priority-1 { border-left-color: var(--priority-1); }
+.task-card.priority-2 { border-left-color: var(--priority-2); }
+.task-card.priority-3 { border-left-color: var(--priority-3); }
+.task-card.priority-4 { border-left-color: var(--priority-4); }
+.task-card.priority-5 { border-left-color: var(--priority-5); }
+
+.task-title {
+    font-size: 0.9rem;
+    font-weight: 600;
+    margin-bottom: 6px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.task-meta {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    font-size: 0.8rem;
+}
+
+.task-time {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-top: 4px;
+}
+
+/* Priority Badges */
+.priority {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.priority-1 { color: var(--priority-1); }
+.priority-2 { color: var(--priority-2); }
+.priority-3 { color: var(--priority-3); }
+.priority-4 { color: var(--priority-4); }
+.priority-5 { color: var(--priority-5); }
+
+/* Status Badges */
+.status-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.status-badge.pending { background: rgba(88, 166, 255, 0.15); color: var(--status-pending); }
+.status-badge.claimed { background: rgba(210, 153, 34, 0.15); color: var(--status-claimed); }
+.status-badge.completed { background: rgba(63, 185, 80, 0.15); color: var(--status-completed); }
+.status-badge.failed { background: rgba(248, 81, 73, 0.15); color: var(--status-failed); }
+
+.status-badge.large {
+    padding: 4px 12px;
+    font-size: 0.85rem;
+}
+
+/* Agent Badges */
+.agent {
+    color: var(--accent);
+    font-size: 0.8rem;
+}
+
+.project {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+}
+
+/* Empty State */
+.empty-state {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    text-align: center;
+    padding: 24px 12px;
+    border: 1px dashed var(--border);
+    border-radius: var(--card-radius);
+}
+
+/* Agents Section */
+.agents-section {
+    margin-top: 16px;
+}
+
+.agents-section h2 {
+    font-size: 1.2rem;
+    margin-bottom: 16px;
+}
+
+.agent-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 12px;
+}
+
+.agent-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--card-radius);
+    padding: 16px;
+    border-left: 3px solid var(--text-muted);
+}
+
+.agent-card.status-idle { border-left-color: var(--status-completed); }
+.agent-card.status-busy { border-left-color: var(--status-claimed); }
+.agent-card.status-offline { border-left-color: var(--text-muted); }
+
+.agent-name {
+    font-weight: 600;
+    font-size: 1rem;
+    margin-bottom: 4px;
+}
+
+.agent-model {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+}
+
+.agent-stats {
+    display: flex;
+    gap: 12px;
+    font-size: 0.8rem;
+    align-items: center;
+}
+
+/* Task Detail Page */
+.task-detail {
+    max-width: 900px;
+    margin: 0 auto;
+}
+
+.task-detail-header {
+    margin-bottom: 24px;
+}
+
+.back-link {
+    color: var(--accent);
+    text-decoration: none;
+    font-size: 0.9rem;
+    display: inline-block;
+    margin-bottom: 12px;
+}
+
+.back-link:hover {
+    color: var(--accent-hover);
+}
+
+.task-detail-header h1 {
+    font-size: 1.5rem;
+    margin-bottom: 8px;
+}
+
+.task-detail-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    margin-bottom: 16px;
+}
+
+.detail-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--card-radius);
+    padding: 16px;
+    margin-bottom: 16px;
+}
+
+.detail-card h3 {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+}
+
+.detail-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 0;
+    font-size: 0.9rem;
+}
+
+.detail-label {
+    color: var(--text-secondary);
+}
+
+.detail-value {
+    color: var(--text-primary);
+    text-align: right;
+}
+
+.description-card,
+.result-card,
+.error-card {
+    margin-bottom: 16px;
+}
+
+.description-content {
+    font-size: 0.95rem;
+    line-height: 1.7;
+    white-space: pre-wrap;
+    color: var(--text-primary);
+}
+
+.error-card {
+    border-left: 3px solid var(--status-failed);
+}
+
+.result-card {
+    border-left: 3px solid var(--status-completed);
+}
+
+/* Footer */
+.footer {
+    text-align: center;
+    padding: 24px;
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    border-top: 1px solid var(--border);
+    margin-top: 32px;
+}
+
+/* Responsive */
+@media (max-width: 1024px) {
+    .board-columns {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    .stats-bar {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    .task-detail-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 640px) {
+    .board-columns {
+        grid-template-columns: 1fr;
+    }
+    .stats-bar {
+        grid-template-columns: 1fr;
+    }
+}

@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}Task #{{ task.id }} — Task Board{% endblock %}
+
+{% block content %}
+<div class="task-detail">
+    <div class="task-detail-header">
+        <a href="/" class="back-link">← Back to Dashboard</a>
+        <h1>{{ task.title }}</h1>
+        <span class="status-badge large {{ task.status }}">{{ task.status }}</span>
+    </div>
+
+    <div class="task-detail-grid">
+        <div class="detail-card">
+            <h3>Details</h3>
+            <div class="detail-row">
+                <span class="detail-label">ID</span>
+                <span class="detail-value">#{{ task.id }}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Priority</span>
+                <span class="detail-value priority priority-{{ task.priority }}">P{{ task.priority }}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Project</span>
+                <span class="detail-value">{{ task.project }}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Tags</span>
+                <span class="detail-value">{{ task.tags or '—' }}</span>
+            </div>
+        </div>
+
+        <div class="detail-card">
+            <h3>Assignment</h3>
+            <div class="detail-row">
+                <span class="detail-label">Agent</span>
+                <span class="detail-value">{{ task.agent or 'Unassigned' }}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Status</span>
+                <span class="detail-value status-badge {{ task.status }}">{{ task.status }}</span>
+            </div>
+        </div>
+
+        <div class="detail-card">
+            <h3>Timeline</h3>
+            <div class="detail-row">
+                <span class="detail-label">Created</span>
+                <span class="detail-value">{{ task.created_at.strftime('%Y-%m-%d %H:%M:%S') if task.created_at else '—' }}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Claimed</span>
+                <span class="detail-value">{{ task.claimed_at.strftime('%Y-%m-%d %H:%M:%S') if task.claimed_at else '—' }}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Completed</span>
+                <span class="detail-value">{{ task.completed_at.strftime('%Y-%m-%d %H:%M:%S') if task.completed_at else '—' }}</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="detail-card description-card">
+        <h3>Description</h3>
+        <div class="description-content">{{ task.description or 'No description provided.' }}</div>
+    </div>
+
+    {% if task.result %}
+    <div class="detail-card result-card">
+        <h3>Result</h3>
+        <div class="description-content">{{ task.result }}</div>
+    </div>
+    {% endif %}
+
+    {% if task.error %}
+    <div class="detail-card error-card">
+        <h3>Error</h3>
+        <div class="description-content">{{ task.error }}</div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

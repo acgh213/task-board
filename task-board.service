@@ -1,0 +1,15 @@
+[Unit]
+Description=Hermes Task Board
+After=network.target
+
+[Service]
+Type=simple
+User=exedev
+WorkingDirectory=/home/exedev/task-board
+ExecStart=/home/exedev/venv/bin/python run.py
+Restart=always
+RestartSec=5
+Environment=PORT=8893
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — Task Board{% endblock %}
+
+{% block content %}
+<div class="dashboard-header">
+    <h1>Task Board</h1>
+    <div class="stats-bar">
+        <div class="stat-card pending">
+            <span class="stat-count">{{ stats.pending }}</span>
+            <span class="stat-label">Pending</span>
+        </div>
+        <div class="stat-card claimed">
+            <span class="stat-count">{{ stats.claimed }}</span>
+            <span class="stat-label">Claimed</span>
+        </div>
+        <div class="stat-card completed">
+            <span class="stat-count">{{ stats.completed }}</span>
+            <span class="stat-label">Completed</span>
+        </div>
+        <div class="stat-card failed">
+            <span class="stat-count">{{ stats.failed }}</span>
+            <span class="stat-label">Failed</span>
+        </div>
+    </div>
+</div>
+
+<div class="board-columns">
+    <div class="column">
+        <h2 class="column-header pending">📋 Pending</h2>
+        {% for task in tasks if task.status == 'pending' %}
+        <a href="/task/{{ task.id }}" class="task-card priority-{{ task.priority }}">
+            <div class="task-title">{{ task.title }}</div>
+            <div class="task-meta">
+                <span class="priority priority-{{ task.priority }}">P{{ task.priority }}</span>
+                <span class="project">{{ task.project }}</span>
+            </div>
+            <div class="task-time">{{ task.created_at.strftime('%Y-%m-%d %H:%M') if task.created_at else '' }}</div>
+        </a>
+        {% else %}
+        <div class="empty-state">No pending tasks</div>
+        {% endfor %}
+    </div>
+
+    <div class="column">
+        <h2 class="column-header claimed">🔄 Claimed</h2>
+        {% for task in tasks if task.status == 'claimed' %}
+        <a href="/task/{{ task.id }}" class="task-card priority-{{ task.priority }}">
+            <div class="task-title">{{ task.title }}</div>
+            <div class="task-meta">
+                <span class="agent">{{ task.agent }}</span>
+                <span class="priority priority-{{ task.priority }}">P{{ task.priority }}</span>
+            </div>
+            <div class="task-time">{{ task.claimed_at.strftime('%Y-%m-%d %H:%M') if task.claimed_at else '' }}</div>
+        </a>
+        {% else %}
+        <div class="empty-state">No claimed tasks</div>
+        {% endfor %}
+    </div>
+
+    <div class="column">
+        <h2 class="column-header completed">✅ Completed</h2>
+        {% for task in tasks if task.status == 'completed' %}
+        <a href="/task/{{ task.id }}" class="task-card priority-{{ task.priority }}">
+            <div class="task-title">{{ task.title }}</div>
+            <div class="task-meta">
+                <span class="agent">{{ task.agent }}</span>
+            </div>
+            <div class="task-time">{{ task.completed_at.strftime('%Y-%m-%d %H:%M') if task.completed_at else '' }}</div>
+        </a>
+        {% else %}
+        <div class="empty-state">No completed tasks</div>
+        {% endfor %}
+    </div>
+
+    <div class="column">
+        <h2 class="column-header failed">❌ Failed</h2>
+        {% for task in tasks if task.status == 'failed' %}
+        <a href="/task/{{ task.id }}" class="task-card priority-{{ task.priority }}">
+            <div class="task-title">{{ task.title }}</div>
+            <div class="task-meta">
+                <span class="agent">{{ task.agent }}</span>
+            </div>
+            <div class="task-time">{{ task.completed_at.strftime('%Y-%m-%d %H:%M') if task.completed_at else '' }}</div>
+        </a>
+        {% else %}
+        <div class="empty-state">No failed tasks</div>
+        {% endfor %}
+    </div>
+</div>
+
+<div class="agents-section">
+    <h2>🤖 Agents</h2>
+    <div class="agent-list">
+        {% for agent in agents %}
+        <div class="agent-card status-{{ agent.status }}">
+            <div class="agent-name">{{ agent.display_name }}</div>
+            <div class="agent-model">{{ agent.model }}</div>
+            <div class="agent-stats">
+                <span>✅ {{ agent.tasks_completed }}</span>
+                <span>❌ {{ agent.tasks_failed }}</span>
+                <span class="status-badge {{ agent.status }}">{{ agent.status }}</span>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}
