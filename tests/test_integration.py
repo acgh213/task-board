@@ -10,7 +10,7 @@ Tests cover:
 
 import json
 import pytest
-from models import db, Task, Agent
+from models import db, Task, Agent, EventLog
 
 
 @pytest.fixture
@@ -375,3 +375,123 @@ class TestFullLifecycle:
         client.post(f'/api/tasks/{task_id}/submit', json={'agent': 'coder', 'result': 'Done'})
         resp = client.post(f'/api/tasks/{task_id}/review', json={'reviewer': 'editor'})
         assert resp.status_code == 400
+
+
+class TestAutoAssignFullLifecycle:
+    """Tests for auto-assign followed by full lifecycle and event log verification."""
+
+    @pytest.fixture
+    def app(self):
+        from app import create_app
+        app = create_app(testing=True)
+        with app.app_context():
+            db.create_all()
+            # Seed agents with skills (needed for auto-assign matching)
+            agents_data = [
+                ('coder', 'Coder', 'deepseek-v4-flash', 'worker',
+                 'python,flask,backend,api', 'task-board,hermes', 3, 'idle'),
+                ('editor', 'Editor', 'gpt-5-nano', 'worker',
+                 'text,docs,frontend,ui', 'hermes,docs', 3, 'idle'),
+                ('researcher', 'Researcher', 'deepseek-v4-flash', 'worker',
+                 'research,data,analysis,content', 'general,research', 2, 'idle'),
+            ]
+            for name, display, model, role, skills, projects, maxc, status in agents_data:
+                db.session.add(Agent(
+                    name=name, display_name=display, model=model,
+                    role=role, skills=skills,
+                    preferred_projects=projects,
+                    max_concurrent=maxc, status=status,
+                ))
+            db.session.commit()
+            yield app
+            db.drop_all()
+
+    @pytest.fixture
+    def client(self, app):
+        return app.test_client()
+
+    def test_auto_assign_full_lifecycle_and_event_log(self, app, client):
+        """Create task with python tags, auto-assign, walk claim→start→submit→review→complete,
+        then verify all 7 event log entries exist."""
+        # --- Step 1: Create a task with python tags ---
+        resp = client.post('/api/tasks', json={
+            'title': 'Python integration test',
+            'tags': 'python,api',
+            'priority': 2,
+            'project': 'task-board',
+            'description': 'Test auto-assign + full lifecycle + event log',
+        })
+        assert resp.status_code == 201
+        task_data = resp.get_json()
+        task_id = task_data['id']
+        assert task_data['status'] == 'pending'
+        assert task_data['tags'] == 'python,api'
+
+        # --- Step 2: Call auto-assign ---
+        resp = client.post('/api/overseer/auto-assign')
+        assert resp.status_code == 200
+        auto_data = resp.get_json()
+        assert auto_data['assigned'] >= 1
+
+        # --- Step 3: Verify coder got assigned ---
+        resp = client.get(f'/api/tasks/{task_id}')
+        task_data = resp.get_json()
+        assert task_data['status'] == 'assigned'
+        assert task_data['assigned_to'] == 'coder', f"Expected coder, got {task_data['assigned_to']}"
+
+        # --- Step 4: Claim the task ---
+        resp = client.post(f'/api/tasks/{task_id}/claim', json={'agent': 'coder'})
+        assert resp.status_code == 200
+        assert resp.get_json()['status'] == 'claimed'
+        assert resp.get_json()['claimed_by'] == 'coder'
+
+        # --- Step 5: Start work ---
+        resp = client.post(f'/api/tasks/{task_id}/start', json={'agent': 'coder'})
+        assert resp.status_code == 200
+        assert resp.get_json()['status'] == 'in_progress'
+
+        # --- Step 6: Submit work ---
+        resp = client.post(f'/api/tasks/{task_id}/submit', json={
+            'agent': 'coder',
+            'result': 'Auto-assign lifecycle test passed',
+        })
+        assert resp.status_code == 200
+        assert resp.get_json()['status'] == 'in_review'
+
+        # --- Step 7: Review and approve ---
+        resp = client.post(f'/api/tasks/{task_id}/review', json={
+            'reviewer': 'editor',
+            'decision': 'approve',
+        })
+        assert resp.status_code == 200
+        assert resp.get_json()['task']['status'] == 'completed'
+
+        # --- Step 8: Verify event log has all 7 steps ---
+        events_resp = client.get(f'/api/tasks/{task_id}/events')
+        assert events_resp.status_code == 200
+        events = events_resp.get_json()['events']
+
+        expected_event_types = [
+            'task_created',
+            'assigned',
+            'claimed',
+            'in_progress',
+            'submitted',
+            'in_review',
+            'completed',
+        ]
+        actual_event_types = [e['event_type'] for e in events]
+        assert len(events) >= len(expected_event_types), \
+            f"Expected at least {len(expected_event_types)} events, got {len(events)}: {actual_event_types}"
+
+        for expected in expected_event_types:
+            assert expected in actual_event_types, \
+                f"Missing event type '{expected}' in event log. Got: {actual_event_types}"
+
+        # Verify the auto-assigned event has auto_assign=True in details
+        assigned_events = [e for e in events if e['event_type'] == 'assigned']
+        assert len(assigned_events) >= 1
+        auto_assign_events = [e for e in assigned_events
+                              if e.get('details', {}).get('auto_assign')]
+        assert len(auto_assign_events) >= 1, \
+            "Expected at least one assigned event with auto_assign=True"

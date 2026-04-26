@@ -6,43 +6,74 @@
     <h1>Task Board</h1>
     <div class="stats-bar">
         <div class="stat-card pending">
-            <span class="stat-count">{{ stats.pending or 0 }}</span>
+            <span class="stat-count">{{ stats.get('pending', 0) }}</span>
             <span class="stat-label">Pending</span>
         </div>
         <div class="stat-card assigned">
-            <span class="stat-count">{{ stats.assigned or 0 }}</span>
+            <span class="stat-count">{{ stats.get('assigned', 0) }}</span>
             <span class="stat-label">Assigned</span>
         </div>
         <div class="stat-card claimed">
-            <span class="stat-count">{{ stats.claimed or 0 }}</span>
+            <span class="stat-count">{{ stats.get('claimed', 0) }}</span>
             <span class="stat-label">Claimed</span>
         </div>
         <div class="stat-card in_progress">
-            <span class="stat-count">{{ stats.in_progress or 0 }}</span>
+            <span class="stat-count">{{ stats.get('in_progress', 0) }}</span>
             <span class="stat-label">In Progress</span>
         </div>
+        <div class="stat-card submitted">
+            <span class="stat-count">{{ stats.get('submitted', 0) }}</span>
+            <span class="stat-label">Submitted</span>
+        </div>
         <div class="stat-card in_review">
-            <span class="stat-count">{{ stats.in_review or 0 }}</span>
+            <span class="stat-count">{{ stats.get('in_review', 0) }}</span>
             <span class="stat-label">In Review</span>
         </div>
+        <div class="stat-card needs_revision">
+            <span class="stat-count">{{ stats.get('needs_revision', 0) }}</span>
+            <span class="stat-label">Needs Revision</span>
+        </div>
         <div class="stat-card completed">
-            <span class="stat-count">{{ stats.completed or 0 }}</span>
+            <span class="stat-count">{{ stats.get('completed', 0) }}</span>
             <span class="stat-label">Completed</span>
         </div>
         <div class="stat-card failed">
-            <span class="stat-count">{{ stats.failed or 0 }}</span>
+            <span class="stat-count">{{ stats.get('failed', 0) }}</span>
             <span class="stat-label">Failed</span>
         </div>
+        <div class="stat-card timed_out">
+            <span class="stat-count">{{ stats.get('timed_out', 0) }}</span>
+            <span class="stat-label">Timed Out</span>
+        </div>
+        <div class="stat-card blocked">
+            <span class="stat-count">{{ stats.get('blocked', 0) }}</span>
+            <span class="stat-label">Blocked</span>
+        </div>
+        <div class="stat-card released">
+            <span class="stat-count">{{ stats.get('released', 0) }}</span>
+            <span class="stat-label">Released</span>
+        </div>
         <div class="stat-card needs_human">
-            <span class="stat-count">{{ stats.needs_human or 0 }}</span>
+            <span class="stat-count">{{ stats.get('needs_human', 0) }}</span>
             <span class="stat-label">Needs Human</span>
+        </div>
+        <div class="stat-card needs_vesper">
+            <span class="stat-count">{{ stats.get('needs_vesper', 0) }}</span>
+            <span class="stat-label">Needs Vesper</span>
+        </div>
+        <div class="stat-card dead">
+            <span class="stat-count">{{ stats.get('dead', 0) }}</span>
+            <span class="stat-label">Dead</span>
         </div>
     </div>
 </div>
 
+<!-- Kanban Board — 5 Grouped Columns for 15 Statuses -->
 <div class="board-columns">
+
+    <!-- Column 1: Pipeline Start -->
     <div class="column">
-        <h2 class="column-header pending">📋 Pending</h2>
+        <h2 class="column-header pending">📋 Pipeline</h2>
         {% for task in tasks if task.status == 'pending' %}
         <a href="/task/{{ task.id }}" class="task-card priority-{{ task.priority }}">
             <div class="task-title">{{ task.title }}</div>
@@ -52,13 +83,7 @@
             </div>
             <div class="task-time">{{ task.created_at.strftime('%Y-%m-%d %H:%M') if task.created_at else '' }}</div>
         </a>
-        {% else %}
-        <div class="empty-state">No pending tasks</div>
         {% endfor %}
-    </div>
-
-    <div class="column">
-        <h2 class="column-header assigned">📌 Assigned</h2>
         {% for task in tasks if task.status == 'assigned' %}
         <a href="/task/{{ task.id }}" class="task-card priority-{{ task.priority }}">
             <div class="task-title">{{ task.title }}</div>
@@ -66,47 +91,75 @@
                 <span class="agent">{{ task.assigned_to }}</span>
                 <span class="priority priority-{{ task.priority }}">P{{ task.priority }}</span>
             </div>
-            <div class="task-time">{{ task.assigned_at.strftime('%Y-%m-%d %H:%M') if task.assigned_at else '' }}</div>
+            <div class="task-task-status">{{ task.status }}</div>
         </a>
-        {% else %}
-        <div class="empty-state">No assigned tasks</div>
         {% endfor %}
-    </div>
-
-    <div class="column">
-        <h2 class="column-header claimed">🔄 In Progress</h2>
-        {% for task in tasks if task.status in ('claimed', 'in_progress') %}
+        {% for task in tasks if task.status == 'claimed' %}
         <a href="/task/{{ task.id }}" class="task-card priority-{{ task.priority }}">
             <div class="task-title">{{ task.title }}</div>
             <div class="task-meta">
-                <span class="agent">{{ task.claimed_by or task.agent }}</span>
+                <span class="agent">{{ task.claimed_by }}</span>
                 <span class="priority priority-{{ task.priority }}">P{{ task.priority }}</span>
             </div>
             <div class="task-task-status">{{ task.status }}</div>
         </a>
-        {% else %}
-        <div class="empty-state">No active tasks</div>
         {% endfor %}
+        {% set ns = namespace(has_tasks=false) %}
+        {% for t in tasks %}{% if t.status in ('pending','assigned','claimed') %}{% set ns.has_tasks = true %}{% endif %}{% endfor %}
+        {% if not ns.has_tasks %}<div class="empty-state">No tasks in pipeline</div>{% endif %}
     </div>
 
+    <!-- Column 2: Active Work -->
     <div class="column">
-        <h2 class="column-header in_review">🔍 Review</h2>
-        {% for task in tasks if task.status in ('submitted', 'in_review', 'needs_revision') %}
+        <h2 class="column-header in_progress">🔧 Active</h2>
+        {% for task in tasks if task.status == 'in_progress' %}
         <a href="/task/{{ task.id }}" class="task-card priority-{{ task.priority }}">
             <div class="task-title">{{ task.title }}</div>
             <div class="task-meta">
-                <span class="agent">{{ task.claimed_by or task.agent }}</span>
+                <span class="agent">{{ task.claimed_by }}</span>
                 <span class="priority priority-{{ task.priority }}">P{{ task.priority }}</span>
             </div>
             <div class="task-task-status">{{ task.status }}</div>
         </a>
-        {% else %}
-        <div class="empty-state">No tasks in review</div>
         {% endfor %}
+        {% for task in tasks if task.status == 'submitted' %}
+        <a href="/task/{{ task.id }}" class="task-card priority-{{ task.priority }}">
+            <div class="task-title">{{ task.title }}</div>
+            <div class="task-meta">
+                <span class="agent">{{ task.claimed_by }}</span>
+                <span class="priority priority-{{ task.priority }}">P{{ task.priority }}</span>
+            </div>
+            <div class="task-task-status">submitted</div>
+        </a>
+        {% endfor %}
+        {% for task in tasks if task.status == 'in_review' %}
+        <a href="/task/{{ task.id }}" class="task-card priority-{{ task.priority }}">
+            <div class="task-title">{{ task.title }}</div>
+            <div class="task-meta">
+                <span class="agent">{{ task.claimed_by }}</span>
+                <span class="priority priority-{{ task.priority }}">P{{ task.priority }}</span>
+            </div>
+            <div class="task-task-status">in review</div>
+        </a>
+        {% endfor %}
+        {% for task in tasks if task.status == 'needs_revision' %}
+        <a href="/task/{{ task.id }}" class="task-card priority-{{ task.priority }}">
+            <div class="task-title">{{ task.title }}</div>
+            <div class="task-meta">
+                <span class="agent">{{ task.claimed_by }}</span>
+                <span class="priority priority-{{ task.priority }}">P{{ task.priority }}</span>
+            </div>
+            <div class="task-task-status">needs revision</div>
+        </a>
+        {% endfor %}
+        {% set ns2 = namespace(has_tasks=false) %}
+        {% for t in tasks %}{% if t.status in ('in_progress','submitted','in_review','needs_revision') %}{% set ns2.has_tasks = true %}{% endif %}{% endfor %}
+        {% if not ns2.has_tasks %}<div class="empty-state">No active tasks</div>{% endif %}
     </div>
 
+    <!-- Column 3: Completed & Released -->
     <div class="column">
-        <h2 class="column-header completed">✅ Completed</h2>
+        <h2 class="column-header completed">✅ Done</h2>
         {% for task in tasks if task.status == 'completed' %}
         <a href="/task/{{ task.id }}" class="task-card priority-{{ task.priority }}">
             <div class="task-title">{{ task.title }}</div>
@@ -115,44 +168,101 @@
             </div>
             <div class="task-time">{{ task.completed_at.strftime('%Y-%m-%d %H:%M') if task.completed_at else '' }}</div>
         </a>
-        {% else %}
-        <div class="empty-state">No completed tasks</div>
         {% endfor %}
-    </div>
-
-    <div class="column">
-        <h2 class="column-header failed">❌ Failed / Blocked</h2>
-        {% for task in tasks if task.status in ('failed', 'timed_out', 'blocked', 'dead') %}
-        <a href="/task/{{ task.id }}" class="task-card priority-{{ task.priority }}">
-            <div class="task-title">{{ task.title }}</div>
-            <div class="task-meta">
-                <span class="agent">{{ task.claimed_by or task.agent }}</span>
-                <span>#{{ task.attempts }}/{{ task.max_attempts }}</span>
-            </div>
-            <div class="task-task-status">{{ task.status }}</div>
-        </a>
-        {% else %}
-        <div class="empty-state">No failed tasks</div>
-        {% endfor %}
-    </div>
-
-    <div class="column">
-        <h2 class="column-header needs_human">🆘 Escalated</h2>
-        {% for task in tasks if task.status in ('needs_human', 'needs_vesper') %}
+        {% for task in tasks if task.status == 'released' %}
         <a href="/task/{{ task.id }}" class="task-card priority-{{ task.priority }}">
             <div class="task-title">{{ task.title }}</div>
             <div class="task-meta">
                 <span class="project">{{ task.project }}</span>
                 <span class="priority priority-{{ task.priority }}">P{{ task.priority }}</span>
             </div>
-            <div class="task-task-status">{{ task.status }}</div>
+            <div class="task-task-status">released</div>
         </a>
-        {% else %}
-        <div class="empty-state">No escalated tasks</div>
         {% endfor %}
+        {% set ns3 = namespace(has_tasks=false) %}
+        {% for t in tasks %}{% if t.status in ('completed','released') %}{% set ns3.has_tasks = true %}{% endif %}{% endfor %}
+        {% if not ns3.has_tasks %}<div class="empty-state">No completed tasks</div>{% endif %}
     </div>
+
+    <!-- Column 4: Failures -->
+    <div class="column">
+        <h2 class="column-header failed">❌ Failures</h2>
+        {% for task in tasks if task.status == 'failed' %}
+        <a href="/task/{{ task.id }}" class="task-card priority-{{ task.priority }}">
+            <div class="task-title">{{ task.title }}</div>
+            <div class="task-meta">
+                <span class="agent">{{ task.claimed_by or task.agent }}</span>
+                <span>#{{ task.attempts }}/{{ task.max_attempts }}</span>
+            </div>
+            <div class="task-task-status">failed</div>
+        </a>
+        {% endfor %}
+        {% for task in tasks if task.status == 'timed_out' %}
+        <a href="/task/{{ task.id }}" class="task-card priority-{{ task.priority }}">
+            <div class="task-title">{{ task.title }}</div>
+            <div class="task-meta">
+                <span class="agent">{{ task.claimed_by or task.agent }}</span>
+                <span>#{{ task.attempts }}/{{ task.max_attempts }}</span>
+            </div>
+            <div class="task-task-status">timed out</div>
+        </a>
+        {% endfor %}
+        {% for task in tasks if task.status == 'dead' %}
+        <a href="/task/{{ task.id }}" class="task-card priority-{{ task.priority }}">
+            <div class="task-title">{{ task.title }}</div>
+            <div class="task-meta">
+                <span class="project">{{ task.project }}</span>
+                <span>#{{ task.attempts }}/{{ task.max_attempts }}</span>
+            </div>
+            <div class="task-task-status">dead</div>
+        </a>
+        {% endfor %}
+        {% set ns4 = namespace(has_tasks=false) %}
+        {% for t in tasks %}{% if t.status in ('failed','timed_out','dead') %}{% set ns4.has_tasks = true %}{% endif %}{% endfor %}
+        {% if not ns4.has_tasks %}<div class="empty-state">No failed tasks</div>{% endif %}
+    </div>
+
+    <!-- Column 5: Blocked & Escalated -->
+    <div class="column">
+        <h2 class="column-header needs_human">🚨 Blocked / Escalated</h2>
+        {% for task in tasks if task.status == 'blocked' %}
+        <a href="/task/{{ task.id }}" class="task-card priority-{{ task.priority }}">
+            <div class="task-title">{{ task.title }}</div>
+            <div class="task-meta">
+                <span class="project">{{ task.project }}</span>
+                <span class="priority priority-{{ task.priority }}">P{{ task.priority }}</span>
+            </div>
+            <div class="task-task-status">blocked</div>
+        </a>
+        {% endfor %}
+        {% for task in tasks if task.status == 'needs_human' %}
+        <a href="/task/{{ task.id }}" class="task-card priority-{{ task.priority }}">
+            <div class="task-title">{{ task.title }}</div>
+            <div class="task-meta">
+                <span class="project">{{ task.project }}</span>
+                <span class="priority priority-{{ task.priority }}">P{{ task.priority }}</span>
+            </div>
+            <div class="task-task-status">needs human</div>
+        </a>
+        {% endfor %}
+        {% for task in tasks if task.status == 'needs_vesper' %}
+        <a href="/task/{{ task.id }}" class="task-card priority-{{ task.priority }}">
+            <div class="task-title">{{ task.title }}</div>
+            <div class="task-meta">
+                <span class="project">{{ task.project }}</span>
+                <span class="priority priority-{{ task.priority }}">P{{ task.priority }}</span>
+            </div>
+            <div class="task-task-status">needs vesper</div>
+        </a>
+        {% endfor %}
+        {% set ns5 = namespace(has_tasks=false) %}
+        {% for t in tasks %}{% if t.status in ('blocked','needs_human','needs_vesper') %}{% set ns5.has_tasks = true %}{% endif %}{% endfor %}
+        {% if not ns5.has_tasks %}<div class="empty-state">No blocked tasks</div>{% endif %}
+    </div>
+
 </div>
 
+<!-- Agents Section -->
 <div class="agents-section">
     <h2>🤖 Agents</h2>
     <div class="agent-list">
@@ -160,14 +270,37 @@
         <div class="agent-card status-{{ agent.status }}">
             <div class="agent-name">{{ agent.display_name }}</div>
             <div class="agent-model">{{ agent.model }}</div>
+            <div class="agent-skills">
+                {% for skill in agent.skills.split(',') if agent.skills %}
+                <span class="skill-badge">{{ skill.strip() }}</span>
+                {% endfor %}
+            </div>
             <div class="agent-stats">
                 <span>✅ {{ agent.tasks_completed }}</span>
                 <span>❌ {{ agent.tasks_failed }}</span>
                 <span>⭐ {{ agent.reputation_score|round(1) }}</span>
+                <span>📊 {{ agent_loads.get(agent.name, 0) }}/{{ agent.max_concurrent }}</span>
                 <span class="role-badge">{{ agent.role }}</span>
                 <span class="status-badge {{ agent.status }}">{{ agent.status }}</span>
             </div>
         </div>
+        {% endfor %}
+    </div>
+</div>
+
+<!-- Recent Events Section -->
+<div class="events-section">
+    <h2>📜 Recent Events</h2>
+    <div class="event-list">
+        {% for event in events %}
+        <div class="event-item">
+            <span class="event-type-badge event-{{ event.event_type }}">{{ event.event_type }}</span>
+            <span class="event-agent">{{ event.agent or '—' }}</span>
+            <span class="event-task-ref">#{{ event.task_id }}</span>
+            <span class="event-time">{{ event.created_at.strftime('%Y-%m-%d %H:%M:%S') if event.created_at else '' }}</span>
+        </div>
+        {% else %}
+        <div class="empty-state">No recent events</div>
         {% endfor %}
     </div>
 </div>

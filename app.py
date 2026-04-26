@@ -51,7 +51,19 @@ def create_app(testing=False):
             count = Task.query.filter_by(status=s).count()
             if count > 0:
                 stats[s] = count
-        return render_template('dashboard.html', tasks=tasks, agents=agents, stats=stats)
+        # Compute agent load: count of active (non-terminal) tasks for each agent
+        active_statuses = ['assigned', 'claimed', 'in_progress', 'submitted', 'in_review', 'needs_revision']
+        agent_loads = {}
+        for agent in agents:
+            load = Task.query.filter(
+                Task.status.in_(active_statuses),
+                (Task.assigned_to == agent.name) | (Task.claimed_by == agent.name)
+            ).count()
+            agent_loads[agent.name] = load
+        # Recent events (last 20)
+        events = EventLog.query.order_by(EventLog.created_at.desc()).limit(20).all()
+        return render_template('dashboard.html', tasks=tasks, agents=agents, stats=stats,
+                               agent_loads=agent_loads, events=events)
 
     @app.route('/task/<int:task_id>')
     def task_detail(task_id):

@@ -126,10 +126,17 @@ body {
 .stat-card.assigned { border-top-color: var(--status-assigned); }
 .stat-card.claimed { border-top-color: var(--status-claimed); }
 .stat-card.in_progress { border-top-color: var(--status-in_progress); }
+.stat-card.submitted { border-top-color: var(--status-submitted); }
 .stat-card.in_review { border-top-color: var(--status-in_review); }
+.stat-card.needs_revision { border-top-color: var(--status-needs_revision); }
 .stat-card.completed { border-top-color: var(--status-completed); }
 .stat-card.failed { border-top-color: var(--status-failed); }
+.stat-card.timed_out { border-top-color: var(--status-timed_out); }
+.stat-card.blocked { border-top-color: var(--status-blocked); }
+.stat-card.released { border-top-color: var(--status-released); }
 .stat-card.needs_human { border-top-color: var(--status-needs_human); }
+.stat-card.needs_vesper { border-top-color: var(--status-needs_vesper); }
+.stat-card.dead { border-top-color: var(--status-dead); }
 
 .stat-count {
     display: block;
@@ -553,6 +560,39 @@ body {
     color: var(--text-muted);
     margin-left: auto;
     font-size: 0.7rem;
+}
+
+/* Skill Badges */
+.skill-badge {
+    display: inline-block;
+    background: rgba(88, 166, 255, 0.1);
+    color: var(--accent);
+    padding: 1px 8px;
+    border-radius: 10px;
+    font-size: 0.7rem;
+    margin: 2px 3px 2px 0;
+    border: 1px solid rgba(88, 166, 255, 0.2);
+}
+
+.agent-skills {
+    margin-bottom: 8px;
+    line-height: 1.8;
+}
+
+/* Events Section */
+.events-section {
+    margin-top: 16px;
+}
+
+.events-section h2 {
+    font-size: 1.2rem;
+    margin-bottom: 16px;
+}
+
+.event-task-ref {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    font-weight: 600;
 }
 
 /* Footer */
