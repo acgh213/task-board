@@ -1,6 +1,6 @@
 # app.py
 from flask import Flask, request, jsonify, render_template
-from models import db, Task, Agent
+from models import db, Task, Agent, Review, EventLog
 from config import Config, TestingConfig
 
 
@@ -40,17 +40,20 @@ def create_app(testing=False):
     def dashboard():
         tasks = Task.query.order_by(Task.priority, Task.created_at.desc()).all()
         agents = Agent.query.all()
-        stats = {
-            'pending': Task.query.filter_by(status='pending').count(),
-            'claimed': Task.query.filter_by(status='claimed').count(),
-            'completed': Task.query.filter_by(status='completed').count(),
-            'failed': Task.query.filter_by(status='failed').count(),
-        }
+        stats = {}
+        for s in ['pending', 'assigned', 'claimed', 'in_progress', 'submitted',
+                  'in_review', 'completed', 'failed', 'blocked', 'needs_human',
+                  'needs_vesper', 'needs_revision', 'timed_out', 'released', 'dead']:
+            count = Task.query.filter_by(status=s).count()
+            if count > 0:
+                stats[s] = count
         return render_template('dashboard.html', tasks=tasks, agents=agents, stats=stats)
 
     @app.route('/task/<int:task_id>')
     def task_detail(task_id):
         task = Task.query.get_or_404(task_id)
-        return render_template('task.html', task=task)
+        reviews = Review.query.filter_by(task_id=task_id).all()
+        events = EventLog.query.filter_by(task_id=task_id).order_by(EventLog.created_at).all()
+        return render_template('task.html', task=task, reviews=reviews, events=events)
 
     return app

@@ -19,9 +19,20 @@
     --priority-5: #484f58;
 
     --status-pending: #58a6ff;
+    --status-assigned: #7ee787;
     --status-claimed: #d29922;
+    --status-in_progress: #bc8cff;
+    --status-submitted: #79c0ff;
+    --status-in_review: #f0883e;
+    --status-needs_revision: #ffa657;
     --status-completed: #3fb950;
     --status-failed: #f85149;
+    --status-blocked: #848d97;
+    --status-needs_human: #f778ba;
+    --status-needs_vesper: #d2a8ff;
+    --status-timed_out: #ff7b72;
+    --status-released: #8b949e;
+    --status-dead: #484f58;
 
     --card-radius: 8px;
 }
@@ -79,7 +90,7 @@ body {
 
 /* Container */
 .container {
-    max-width: 1400px;
+    max-width: 1600px;
     margin: 0 auto;
     padding: 24px;
 }
@@ -97,8 +108,8 @@ body {
 /* Stats Bar */
 .stats-bar {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 16px;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 12px;
     margin-bottom: 24px;
 }
 
@@ -106,25 +117,29 @@ body {
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--card-radius);
-    padding: 20px;
+    padding: 16px;
     text-align: center;
     border-top: 3px solid var(--text-muted);
 }
 
 .stat-card.pending { border-top-color: var(--status-pending); }
+.stat-card.assigned { border-top-color: var(--status-assigned); }
 .stat-card.claimed { border-top-color: var(--status-claimed); }
+.stat-card.in_progress { border-top-color: var(--status-in_progress); }
+.stat-card.in_review { border-top-color: var(--status-in_review); }
 .stat-card.completed { border-top-color: var(--status-completed); }
 .stat-card.failed { border-top-color: var(--status-failed); }
+.stat-card.needs_human { border-top-color: var(--status-needs_human); }
 
 .stat-count {
     display: block;
-    font-size: 2rem;
+    font-size: 1.8rem;
     font-weight: 700;
 }
 
 .stat-label {
     display: block;
-    font-size: 0.85rem;
+    font-size: 0.75rem;
     color: var(--text-secondary);
     text-transform: uppercase;
     letter-spacing: 0.5px;
@@ -134,8 +149,8 @@ body {
 /* Board Columns */
 .board-columns {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 16px;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 12px;
     margin-bottom: 32px;
 }
 
@@ -144,16 +159,19 @@ body {
 }
 
 .column-header {
-    font-size: 1rem;
+    font-size: 0.9rem;
     margin-bottom: 12px;
     padding-bottom: 8px;
     border-bottom: 2px solid var(--border);
 }
 
 .column-header.pending { border-bottom-color: var(--status-pending); }
+.column-header.assigned { border-bottom-color: var(--status-assigned); }
 .column-header.claimed { border-bottom-color: var(--status-claimed); }
+.column-header.in_review { border-bottom-color: var(--status-in_review); }
 .column-header.completed { border-bottom-color: var(--status-completed); }
 .column-header.failed { border-bottom-color: var(--status-failed); }
+.column-header.needs_human { border-bottom-color: var(--status-needs_human); }
 
 /* Task Cards */
 .task-card {
@@ -161,7 +179,7 @@ body {
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--card-radius);
-    padding: 12px;
+    padding: 10px;
     margin-bottom: 8px;
     text-decoration: none;
     color: var(--text-primary);
@@ -182,9 +200,9 @@ body {
 .task-card.priority-5 { border-left-color: var(--priority-5); }
 
 .task-title {
-    font-size: 0.9rem;
+    font-size: 0.85rem;
     font-weight: 600;
-    margin-bottom: 6px;
+    margin-bottom: 4px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -192,15 +210,23 @@ body {
 
 .task-meta {
     display: flex;
-    gap: 8px;
+    gap: 6px;
     align-items: center;
-    font-size: 0.8rem;
+    font-size: 0.75rem;
+    flex-wrap: wrap;
 }
 
 .task-time {
-    font-size: 0.75rem;
+    font-size: 0.7rem;
     color: var(--text-muted);
     margin-top: 4px;
+}
+
+.task-task-status {
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    margin-top: 2px;
+    text-transform: uppercase;
 }
 
 /* Priority Badges */
@@ -208,7 +234,7 @@ body {
     display: inline-block;
     padding: 1px 6px;
     border-radius: 4px;
-    font-size: 0.75rem;
+    font-size: 0.7rem;
     font-weight: 600;
 }
 
@@ -223,19 +249,42 @@ body {
     display: inline-block;
     padding: 2px 8px;
     border-radius: 12px;
-    font-size: 0.75rem;
+    font-size: 0.7rem;
     font-weight: 600;
     text-transform: uppercase;
 }
 
 .status-badge.pending { background: rgba(88, 166, 255, 0.15); color: var(--status-pending); }
+.status-badge.assigned { background: rgba(126, 231, 135, 0.15); color: var(--status-assigned); }
 .status-badge.claimed { background: rgba(210, 153, 34, 0.15); color: var(--status-claimed); }
+.status-badge.in_progress { background: rgba(188, 140, 255, 0.15); color: var(--status-in_progress); }
+.status-badge.submitted { background: rgba(121, 192, 255, 0.15); color: var(--status-submitted); }
+.status-badge.in_review { background: rgba(240, 136, 62, 0.15); color: var(--status-in_review); }
+.status-badge.needs_revision { background: rgba(255, 166, 87, 0.15); color: var(--status-needs_revision); }
 .status-badge.completed { background: rgba(63, 185, 80, 0.15); color: var(--status-completed); }
 .status-badge.failed { background: rgba(248, 81, 73, 0.15); color: var(--status-failed); }
+.status-badge.blocked { background: rgba(132, 141, 151, 0.15); color: var(--status-blocked); }
+.status-badge.needs_human { background: rgba(247, 120, 186, 0.15); color: var(--status-needs_human); }
+.status-badge.needs_vesper { background: rgba(210, 168, 255, 0.15); color: var(--status-needs_vesper); }
+.status-badge.timed_out { background: rgba(255, 123, 114, 0.15); color: var(--status-timed_out); }
+.status-badge.released { background: rgba(139, 148, 158, 0.15); color: var(--status-released); }
+.status-badge.dead { background: rgba(72, 79, 82, 0.15); color: var(--status-dead); }
 
 .status-badge.large {
     padding: 4px 12px;
     font-size: 0.85rem;
+}
+
+/* Attempts badge */
+.attempts-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    background: rgba(210, 153, 34, 0.15);
+    color: var(--status-claimed);
+    margin-left: 8px;
+    font-weight: 600;
 }
 
 /* Agent Badges */
@@ -252,9 +301,9 @@ body {
 /* Empty State */
 .empty-state {
     color: var(--text-muted);
-    font-size: 0.85rem;
+    font-size: 0.8rem;
     text-align: center;
-    padding: 24px 12px;
+    padding: 20px 12px;
     border: 1px dashed var(--border);
     border-radius: var(--card-radius);
 }
@@ -284,7 +333,7 @@ body {
 }
 
 .agent-card.status-idle { border-left-color: var(--status-completed); }
-.agent-card.status-busy { border-left-color: var(--status-claimed); }
+.agent-card.status-busy { border-left-color: var(--status-in_progress); }
 .agent-card.status-offline { border-left-color: var(--text-muted); }
 
 .agent-name {
@@ -304,11 +353,22 @@ body {
     gap: 12px;
     font-size: 0.8rem;
     align-items: center;
+    flex-wrap: wrap;
+}
+
+.role-badge {
+    background: rgba(88, 166, 255, 0.15);
+    color: var(--accent);
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
 }
 
 /* Task Detail Page */
 .task-detail {
-    max-width: 900px;
+    max-width: 1000px;
     margin: 0 auto;
 }
 
@@ -395,6 +455,106 @@ body {
     border-left: 3px solid var(--status-completed);
 }
 
+/* Review Items */
+.review-item {
+    padding: 12px;
+    margin-bottom: 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--card-radius);
+    border-left: 3px solid var(--text-muted);
+}
+
+.review-item.review-approve { border-left-color: var(--status-completed); }
+.review-item.review-reject { border-left-color: var(--status-failed); }
+.review-item.review-request_changes { border-left-color: var(--status-needs_revision); }
+
+.review-header {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 6px;
+}
+
+.reviewer {
+    font-weight: 600;
+    font-size: 0.85rem;
+}
+
+.review-decision {
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    padding: 1px 8px;
+    border-radius: 4px;
+}
+
+.decision-approve { color: var(--status-completed); background: rgba(63, 185, 80, 0.15); }
+.decision-reject { color: var(--status-failed); background: rgba(248, 81, 73, 0.15); }
+.decision-request_changes { color: var(--status-needs_revision); background: rgba(255, 166, 87, 0.15); }
+
+.review-feedback {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    margin-bottom: 4px;
+    white-space: pre-wrap;
+}
+
+.review-time {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+}
+
+/* Event Log */
+.event-list {
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.event-item {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    padding: 6px 8px;
+    font-size: 0.8rem;
+    border-bottom: 1px solid var(--border);
+}
+
+.event-item:last-child {
+    border-bottom: none;
+}
+
+.event-type-badge {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.event-task_created { background: rgba(88, 166, 255, 0.15); color: var(--status-pending); }
+.event-assigned { background: rgba(126, 231, 135, 0.15); color: var(--status-assigned); }
+.event-claimed { background: rgba(210, 153, 34, 0.15); color: var(--status-claimed); }
+.event-in_progress { background: rgba(188, 140, 255, 0.15); color: var(--status-in_progress); }
+.event-submitted { background: rgba(121, 192, 255, 0.15); color: var(--status-submitted); }
+.event-in_review { background: rgba(240, 136, 62, 0.15); color: var(--status-in_review); }
+.event-reviewed { background: rgba(255, 166, 87, 0.15); color: var(--status-needs_revision); }
+.event-completed { background: rgba(63, 185, 80, 0.15); color: var(--status-completed); }
+.event-escalated { background: rgba(247, 120, 186, 0.15); color: var(--status-needs_human); }
+.event-released { background: rgba(139, 148, 158, 0.15); color: var(--status-released); }
+.event-heartbeat { background: rgba(88, 166, 255, 0.1); color: var(--accent); }
+.event-requeued { background: rgba(210, 153, 34, 0.15); color: var(--status-claimed); }
+.event-dead { background: rgba(72, 79, 82, 0.15); color: var(--status-dead); }
+
+.event-agent {
+    color: var(--accent);
+}
+
+.event-time {
+    color: var(--text-muted);
+    margin-left: auto;
+    font-size: 0.7rem;
+}
+
 /* Footer */
 .footer {
     text-align: center;
@@ -406,7 +566,13 @@ body {
 }
 
 /* Responsive */
-@media (max-width: 1024px) {
+@media (max-width: 1200px) {
+    .board-columns {
+        grid-template-columns: repeat(4, 1fr);
+    }
+}
+
+@media (max-width: 900px) {
     .board-columns {
         grid-template-columns: repeat(2, 1fr);
     }

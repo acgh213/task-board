@@ -28,6 +28,24 @@ def client(app):
     return app.test_client()
 
 
+def _full_complete(client, task_id, agent='coder', reviewer='editor', result='Done'):
+    """Helper: run full happy-path lifecycle and return the review response."""
+    client.post(f'/api/tasks/{task_id}/assign', json={'agent': agent})
+    client.post(f'/api/tasks/{task_id}/claim', json={'agent': agent})
+    client.post(f'/api/tasks/{task_id}/start', json={'agent': agent})
+    client.post(f'/api/tasks/{task_id}/submit', json={'agent': agent, 'result': result})
+    return client.post(f'/api/tasks/{task_id}/review', json={'reviewer': reviewer, 'decision': 'approve'})
+
+
+def _full_fail(client, task_id, agent='coder', reviewer='editor', result='Result', feedback='Oops'):
+    """Helper: run lifecycle ending in rejection."""
+    client.post(f'/api/tasks/{task_id}/assign', json={'agent': agent})
+    client.post(f'/api/tasks/{task_id}/claim', json={'agent': agent})
+    client.post(f'/api/tasks/{task_id}/start', json={'agent': agent})
+    client.post(f'/api/tasks/{task_id}/submit', json={'agent': agent, 'result': result})
+    return client.post(f'/api/tasks/{task_id}/review', json={'reviewer': reviewer, 'decision': 'reject', 'feedback': feedback})
+
+
 class TestTaskAPI:
     def test_create_task(self, client):
         resp = client.post('/api/tasks', json={
@@ -55,8 +73,7 @@ class TestTaskAPI:
         client.post('/api/tasks', json={'title': 'Pending'})
         resp = client.post('/api/tasks', json={'title': 'Done'})
         task_id = resp.get_json()['id']
-        client.post(f'/api/tasks/{task_id}/claim', json={'agent': 'coder'})
-        client.post(f'/api/tasks/{task_id}/complete', json={'result': 'Done'})
+        _full_complete(client, task_id)
 
         resp = client.get('/api/tasks?status=pending')
         tasks = resp.get_json()['tasks']
@@ -65,14 +82,18 @@ class TestTaskAPI:
     def test_claim_task(self, client):
         resp = client.post('/api/tasks', json={'title': 'Claim me'})
         task_id = resp.get_json()['id']
+        # Must assign before claiming
+        client.post(f'/api/tasks/{task_id}/assign', json={'agent': 'coder'})
         resp = client.post(f'/api/tasks/{task_id}/claim', json={'agent': 'coder'})
         assert resp.status_code == 200
         assert resp.get_json()['status'] == 'claimed'
-        assert resp.get_json()['agent'] == 'coder'
+        assert resp.get_json()['claimed_by'] == 'coder'
 
     def test_cannot_claim_already_claimed(self, client):
         resp = client.post('/api/tasks', json={'title': 'Claim me'})
         task_id = resp.get_json()['id']
+        # Must assign before claiming
+        client.post(f'/api/tasks/{task_id}/assign', json={'agent': 'coder'})
         client.post(f'/api/tasks/{task_id}/claim', json={'agent': 'coder'})
         resp = client.post(f'/api/tasks/{task_id}/claim', json={'agent': 'editor'})
         assert resp.status_code == 409
@@ -80,28 +101,30 @@ class TestTaskAPI:
     def test_complete_task(self, client):
         resp = client.post('/api/tasks', json={'title': 'Do it'})
         task_id = resp.get_json()['id']
-        client.post(f'/api/tasks/{task_id}/claim', json={'agent': 'coder'})
-        resp = client.post(f'/api/tasks/{task_id}/complete', json={'result': 'All done!'})
+        resp = _full_complete(client, task_id, result='All done!')
         assert resp.status_code == 200
-        assert resp.get_json()['status'] == 'completed'
-        assert resp.get_json()['result'] == 'All done!'
+        assert resp.get_json()['task']['status'] == 'completed'
+        assert resp.get_json()['task']['result'] == 'All done!'
 
     def test_fail_task(self, client):
         resp = client.post('/api/tasks', json={'title': 'Break it'})
         task_id = resp.get_json()['id']
-        client.post(f'/api/tasks/{task_id}/claim', json={'agent': 'coder'})
-        resp = client.post(f'/api/tasks/{task_id}/fail', json={'error': 'Oops'})
+        resp = _full_fail(client, task_id, feedback='Oops')
         assert resp.status_code == 200
-        assert resp.get_json()['status'] == 'failed'
+        assert resp.get_json()['task']['status'] == 'failed'
 
     def test_release_task(self, client):
         resp = client.post('/api/tasks', json={'title': 'Release me'})
         task_id = resp.get_json()['id']
+        # Must assign and claim before release
+        client.post(f'/api/tasks/{task_id}/assign', json={'agent': 'coder'})
         client.post(f'/api/tasks/{task_id}/claim', json={'agent': 'coder'})
         resp = client.post(f'/api/tasks/{task_id}/release')
         assert resp.status_code == 200
+        # Release clears assignment back to pending
         assert resp.get_json()['status'] == 'pending'
-        assert resp.get_json()['agent'] is None
+        assert resp.get_json()['claimed_by'] is None
+        assert resp.get_json()['assigned_to'] is None
 
     def test_delete_task(self, client):
         resp = client.post('/api/tasks', json={'title': 'Delete me'})
@@ -145,8 +168,7 @@ class TestPagination:
         for i in range(5):
             resp = client.post('/api/tasks', json={'title': f'Beta {i}'})
             tid = resp.get_json()['id']
-            client.post(f'/api/tasks/{tid}/claim', json={'agent': 'coder'})
-            client.post(f'/api/tasks/{tid}/complete', json={'result': 'done'})
+            _full_complete(client, tid, result='done')
         client.post('/api/tasks', json={'title': 'Gamma', 'status': 'pending'})
 
         # Filter by status=completed, paginated

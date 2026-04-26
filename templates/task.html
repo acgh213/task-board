@@ -7,6 +7,9 @@
         <a href="/" class="back-link">← Back to Dashboard</a>
         <h1>{{ task.title }}</h1>
         <span class="status-badge large {{ task.status }}">{{ task.status }}</span>
+        {% if task.attempts %}
+        <span class="attempts-badge">Attempt {{ task.attempts }}/{{ task.max_attempts }}</span>
+        {% endif %}
     </div>
 
     <div class="task-detail-grid">
@@ -28,17 +31,37 @@
                 <span class="detail-label">Tags</span>
                 <span class="detail-value">{{ task.tags or '—' }}</span>
             </div>
+            <div class="detail-row">
+                <span class="detail-label">Reserved For</span>
+                <span class="detail-value">{{ task.reserved_for or '—' }}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Escalation Rules</span>
+                <span class="detail-value">{{ task.escalation_rules if task.escalation_rules != '{}' else '—' }}</span>
+            </div>
         </div>
 
         <div class="detail-card">
             <h3>Assignment</h3>
             <div class="detail-row">
-                <span class="detail-label">Agent</span>
-                <span class="detail-value">{{ task.agent or 'Unassigned' }}</span>
+                <span class="detail-label">Assigned To</span>
+                <span class="detail-value">{{ task.assigned_to or '—' }}</span>
             </div>
             <div class="detail-row">
-                <span class="detail-label">Status</span>
-                <span class="detail-value status-badge {{ task.status }}">{{ task.status }}</span>
+                <span class="detail-label">Claimed By</span>
+                <span class="detail-value">{{ task.claimed_by or '—' }}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Lease Expires</span>
+                <span class="detail-value">{{ task.lease_expires_at.strftime('%Y-%m-%d %H:%M:%S') if task.lease_expires_at else '—' }}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Heartbeat</span>
+                <span class="detail-value">{{ task.heartbeat_at.strftime('%Y-%m-%d %H:%M:%S') if task.heartbeat_at else '—' }}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Attempts</span>
+                <span class="detail-value">{{ task.attempts }}/{{ task.max_attempts }}</span>
             </div>
         </div>
 
@@ -49,8 +72,20 @@
                 <span class="detail-value">{{ task.created_at.strftime('%Y-%m-%d %H:%M:%S') if task.created_at else '—' }}</span>
             </div>
             <div class="detail-row">
+                <span class="detail-label">Assigned</span>
+                <span class="detail-value">{{ task.assigned_at.strftime('%Y-%m-%d %H:%M:%S') if task.assigned_at else '—' }}</span>
+            </div>
+            <div class="detail-row">
                 <span class="detail-label">Claimed</span>
                 <span class="detail-value">{{ task.claimed_at.strftime('%Y-%m-%d %H:%M:%S') if task.claimed_at else '—' }}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">In Progress</span>
+                <span class="detail-value">{{ task.in_progress_at.strftime('%Y-%m-%d %H:%M:%S') if task.in_progress_at else '—' }}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Submitted</span>
+                <span class="detail-value">{{ task.submitted_at.strftime('%Y-%m-%d %H:%M:%S') if task.submitted_at else '—' }}</span>
             </div>
             <div class="detail-row">
                 <span class="detail-label">Completed</span>
@@ -71,10 +106,49 @@
     </div>
     {% endif %}
 
-    {% if task.error %}
+    {% if task.last_error %}
     <div class="detail-card error-card">
-        <h3>Error</h3>
-        <div class="description-content">{{ task.error }}</div>
+        <h3>Error / Feedback</h3>
+        {% if task.failure_reason %}
+        <div class="detail-row">
+            <span class="detail-label">Failure Reason</span>
+            <span class="detail-value">{{ task.failure_reason }}</span>
+        </div>
+        {% endif %}
+        <div class="description-content">{{ task.last_error }}</div>
+    </div>
+    {% endif %}
+
+    {% if reviews %}
+    <div class="detail-card">
+        <h3>Reviews ({{ reviews|length }})</h3>
+        {% for review in reviews %}
+        <div class="review-item review-{{ review.decision }}">
+            <div class="review-header">
+                <span class="reviewer">{{ review.reviewer }}</span>
+                <span class="review-decision decision-{{ review.decision }}">{{ review.decision }}</span>
+            </div>
+            {% if review.feedback %}
+            <div class="review-feedback">{{ review.feedback }}</div>
+            {% endif %}
+            <div class="review-time">{{ review.created_at.strftime('%Y-%m-%d %H:%M:%S') if review.created_at else '' }}</div>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if events %}
+    <div class="detail-card">
+        <h3>Event Log ({{ events|length }})</h3>
+        <div class="event-list">
+            {% for event in events %}
+            <div class="event-item">
+                <span class="event-type-badge event-{{ event.event_type }}">{{ event.event_type }}</span>
+                <span class="event-agent">{{ event.agent or '—' }}</span>
+                <span class="event-time">{{ event.created_at.strftime('%Y-%m-%d %H:%M:%S') if event.created_at else '' }}</span>
+            </div>
+            {% endfor %}
+        </div>
     </div>
     {% endif %}
 </div>
