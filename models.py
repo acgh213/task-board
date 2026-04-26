@@ -83,6 +83,7 @@ class Task(db.Model):
     # Failure Tracking
     attempts = db.Column(db.Integer, default=0)
     max_attempts = db.Column(db.Integer, default=3)
+    timed_out_count = db.Column(db.Integer, default=0)
     last_error = db.Column(db.Text, nullable=True)
     failure_reason = db.Column(db.String(100), nullable=True)
 
@@ -155,6 +156,7 @@ class Task(db.Model):
             'last_seen': self.last_seen.isoformat() if self.last_seen else None,
             'attempts': self.attempts,
             'max_attempts': self.max_attempts,
+            'timed_out_count': self.timed_out_count,
             'last_error': self.last_error,
             'failure_reason': self.failure_reason,
             'escalation_rules': self.escalation_rules,

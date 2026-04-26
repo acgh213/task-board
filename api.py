@@ -53,16 +53,8 @@ def _validate_transition(task, new_status):
 
 
 def _check_escalation_tags(task):
-    """Auto-escalate if task tags match dangerous patterns."""
-    if not task.tags:
-        return None
-    task_tags = {t.strip().lower() for t in task.tags.split(',') if t.strip()}
-    for tag in task_tags:
-        if tag in ESCALATION_TAGS_HUMAN:
-            return 'needs_human'
-        if tag in ESCALATION_TAGS_VESPER:
-            return 'needs_vesper'
-    return None
+    """Auto-escalate if task tags match dangerous patterns. Delegates to model method."""
+    return task.check_escalation_tags()
 
 
 # ── Task CRUD ───────────────────────────────
@@ -755,3 +747,115 @@ def stats():
         'by_status': by_status,
         'by_agent': by_agent,
     })
+
+
+# ── Overseer: timeout check ────────────────────────────────
+
+@api_bp.route('/overseer/check-timeouts', methods=['POST'])
+def check_timeouts():
+    """Scan for tasks with expired leases and transition them to timed_out.
+    This is the Overseer's heartbeat check — call periodically via cron."""
+    now = datetime.now(timezone.utc)
+    now_naive = now.replace(tzinfo=None)
+
+    # Find tasks in claimed/in_progress with expired leases
+    stuck = Task.query.filter(
+        Task.status.in_(['claimed', 'in_progress']),
+        Task.lease_expires_at.isnot(None),
+    ).all()
+
+    timed_out_count = 0
+    for task in stuck:
+        expires = task.lease_expires_at
+        if expires and expires.tzinfo is not None:
+            expires = expires.replace(tzinfo=None)
+        if expires and now_naive > expires:
+            old_status = task.status
+            ok, err = _validate_transition(task, 'timed_out')
+            if ok:
+                task.status = 'timed_out'
+                task.last_error = f'Lease expired at {expires.isoformat()}'
+                task.failure_reason = 'timeout'
+                task.timed_out_count = (task.timed_out_count or 0) + 1
+                task.updated_at = now
+                timed_out_count += 1
+
+                _log_event(task.id, 'timed_out', details={
+                    'from_status': old_status,
+                    'lease_expires_at': expires.isoformat(),
+                    'checked_at': now.isoformat(),
+                })
+
+                # Update agent stats
+                if task.claimed_by:
+                    agent = db.session.get(Agent, task.claimed_by)
+                    if agent:
+                        agent.tasks_timed_out = (agent.tasks_timed_out or 0) + 1
+                        agent.status = 'idle'
+
+    db.session.commit()
+    return jsonify({
+        'checked': len(stuck),
+        'timed_out': timed_out_count,
+        'checked_at': now.isoformat(),
+    })
+
+
+# ── Resolve: needs_human / needs_vesper → in_review ────────
+
+@api_bp.route('/tasks/<int:task_id>/resolve', methods=['POST'])
+def resolve_task(task_id):
+    """Resolve a task from needs_human/needs_vesper status.
+    Human/Vesper reviews and routes it: approve → completed,
+    reject → failed, or send back through pipeline → assigned/pending."""
+    task = Task.query.get_or_404(task_id)
+    if task.status not in ('needs_human', 'needs_vesper'):
+        return jsonify({'error': f'Task is {task.status}, not in needs_human/needs_vesper'}), 409
+
+    data = request.get_json() or {}
+    decision = data.get('decision')  # approve, reject, reassign, release
+    reason = data.get('reason', '')
+
+    if decision not in ('approve', 'reject', 'reassign', 'release'):
+        return jsonify({'error': 'decision must be approve, reject, reassign, or release'}), 400
+
+    now = datetime.now(timezone.utc)
+    old_status = task.status
+
+    if decision == 'approve':
+        task.status = 'completed'
+        task.completed_at = now
+        task.result = reason or task.result
+        task.updated_at = now
+        _log_event(task.id, 'resolved', details={
+            'from_status': old_status, 'decision': 'approve', 'reason': reason,
+        })
+    elif decision == 'reject':
+        task.status = 'failed'
+        task.last_error = reason
+        task.failure_reason = 'rejected_by_human'
+        task.updated_at = now
+        _log_event(task.id, 'resolved', details={
+            'from_status': old_status, 'decision': 'reject', 'reason': reason,
+        })
+    elif decision == 'reassign':
+        task.status = 'pending'
+        task.claimed_by = None
+        task.assigned_to = None
+        task.lease_expires_at = None
+        task.updated_at = now
+        _log_event(task.id, 'resolved', details={
+            'from_status': old_status, 'decision': 'reassign', 'reason': reason,
+        })
+    elif decision == 'release':
+        task.status = 'pending'
+        task.claimed_by = None
+        task.assigned_to = None
+        task.lease_expires_at = None
+        task.updated_at = now
+        _log_event(task.id, 'resolved', details={
+            'from_status': old_status, 'decision': 'release', 'reason': reason,
+        })
+
+    db.session.commit()
+    return jsonify(task.to_dict())
