@@ -236,6 +236,7 @@ class Agent(db.Model):
 
     # Capabilities
     skills = db.Column(db.String(500), default='')
+    preferred_projects = db.Column(db.String(500), default='')
     max_concurrent = db.Column(db.Integer, default=3)
 
     # Reputation (lightweight)
@@ -269,6 +270,7 @@ class Agent(db.Model):
             'model': self.model,
             'role': self.role,
             'skills': self.skills,
+            'preferred_projects': self.preferred_projects,
             'max_concurrent': self.max_concurrent,
             'tasks_completed': self.tasks_completed,
             'tasks_failed': self.tasks_failed,

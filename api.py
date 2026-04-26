@@ -694,6 +694,7 @@ def register_agent():
         existing.model = data.get('model', existing.model)
         existing.role = data.get('role', existing.role)
         existing.skills = data.get('skills', existing.skills)
+        existing.preferred_projects = data.get('preferred_projects', existing.preferred_projects)
         existing.max_concurrent = data.get('max_concurrent', existing.max_concurrent)
     else:
         existing = Agent(
@@ -702,6 +703,7 @@ def register_agent():
             model=data.get('model', ''),
             role=data.get('role', 'worker'),
             skills=data.get('skills', ''),
+            preferred_projects=data.get('preferred_projects', ''),
             max_concurrent=data.get('max_concurrent', 3),
         )
         db.session.add(existing)
@@ -859,3 +861,266 @@ def resolve_task(task_id):
 
     db.session.commit()
     return jsonify(task.to_dict())
+
+
+# ── Overseer: auto-assign ────────────────────────────────
+
+@api_bp.route('/overseer/auto-assign', methods=['POST'])
+def auto_assign():
+    """Scan pending tasks, score each available agent, and assign to the best match."""
+    now = datetime.now(timezone.utc)
+    assigned_count = 0
+    skipped_count = 0
+    results = []
+
+    # 1. Get all pending tasks
+    pending_tasks = Task.query.filter_by(status='pending').order_by(
+        Task.priority, Task.created_at
+    ).all()
+
+    # 2. Get all non-offline agents
+    agents = Agent.query.filter(Agent.status != 'offline').all()
+
+    for task in pending_tasks:
+        best_agent = None
+        best_score = 0
+
+        task_tags = {t.strip().lower() for t in task.tags.split(',') if t.strip()}
+        task_project = task.project or ''
+
+        for agent in agents:
+            score = 0
+
+            # Skill match: task tags overlapping agent skills (+3 per match)
+            agent_skills = {s.strip().lower() for s in agent.skills.split(',') if s.strip()}
+            skill_matches = task_tags & agent_skills
+            score += len(skill_matches) * 3
+
+            # Project match (+2)
+            agent_projects = {p.strip().lower() for p in agent.preferred_projects.split(',') if p.strip()}
+            project_match = task_project.lower() in agent_projects
+            if project_match:
+                score += 2
+
+            # Agent MUST have at least one skill match or project match to be eligible
+            if len(skill_matches) == 0 and not project_match:
+                continue
+
+            # Priority bonus: P1=+5, P2=+4, P3=+3, P4=+2, P5=+1
+            priority_bonus = max(0, 6 - task.priority)
+            score += priority_bonus
+
+            # Availability (+2 if has capacity)
+            active_count = Task.query.filter(
+                Task.claimed_by == agent.name,
+                Task.status.in_(['claimed', 'in_progress'])
+            ).count()
+            if active_count < agent.max_concurrent:
+                score += 2
+
+            # Reputation score / 20
+            score += agent.reputation_score / 20
+
+            if score > best_score:
+                best_score = score
+                best_agent = agent
+
+        # Check reserved_for — only assign if best_agent matches
+        if best_agent and task.reserved_for:
+            best_agent_skills = {s.strip().lower() for s in best_agent.skills.split(',') if s.strip()}
+            agent_role = best_agent.role.strip().lower()
+            reserved = task.reserved_for.strip().lower()
+            if agent_role != reserved and reserved not in best_agent_skills:
+                best_agent = None
+                best_score = 0
+
+        if best_agent and best_score > 0:
+            # Assign the task
+            task.status = 'assigned'
+            task.assigned_to = best_agent.name
+            task.assigned_at = now
+            task.updated_at = now
+
+            _log_event(task.id, 'assigned', agent=best_agent.name, details={
+                'assigned_to': best_agent.name,
+                'auto_assign': True,
+                'score': best_score,
+            })
+            assigned_count += 1
+            results.append({
+                'task_id': task.id,
+                'assigned_to': best_agent.name,
+                'score': best_score,
+            })
+        else:
+            skipped_count += 1
+            results.append({
+                'task_id': task.id,
+                'assigned_to': None,
+                'score': 0,
+                'reason': 'no matching agent',
+            })
+
+    db.session.commit()
+    return jsonify({
+        'assigned': assigned_count,
+        'skipped': skipped_count,
+        'total': len(pending_tasks),
+        'results': results,
+    })
+
+
+# ── Overseer: pending-for-agent ─────────────────────────
+
+@api_bp.route('/overseer/pending-for-agent/<name>', methods=['GET'])
+def pending_for_agent(name):
+    """Return pending tasks whose tags overlap with this agent's skills."""
+    agent = db.session.get(Agent, name)
+    if not agent:
+        return jsonify({'error': f'Agent {name} not found'}), 404
+
+    agent_skills = {s.strip().lower() for s in agent.skills.split(',') if s.strip()}
+    if not agent_skills:
+        return jsonify({'tasks': [], 'total': 0})
+
+    pending_tasks = Task.query.filter_by(status='pending').order_by(
+        Task.priority, Task.created_at
+    ).all()
+
+    matching = []
+    for task in pending_tasks:
+        task_tags = {t.strip().lower() for t in task.tags.split(',') if t.strip()}
+        if task_tags & agent_skills:
+            matching.append(task)
+
+    return jsonify({
+        'tasks': [t.to_dict() for t in matching],
+        'total': len(matching),
+    })
+
+
+# ── Overseer: reclaim timeouts ──────────────────────────
+
+@api_bp.route('/overseer/reclaim-timeouts', methods=['POST'])
+def reclaim_timeouts():
+    """Check timed-out tasks and either release them (if under max_attempts) or mark dead."""
+    now = datetime.now(timezone.utc)
+    released_count = 0
+    dead_count = 0
+    results = []
+
+    timed_out_tasks = Task.query.filter_by(status='timed_out').all()
+
+    for task in timed_out_tasks:
+        task.attempts = (task.attempts or 0) + 1
+
+        if (task.attempts or 0) < (task.max_attempts or 3):
+            # Release: go to released -> auto pending
+            old_agent = task.claimed_by or task.assigned_to
+            task.status = 'released'
+            task.claimed_by = None
+            task.assigned_to = None
+            task.lease_expires_at = None
+            task.heartbeat_at = None
+            task.updated_at = now
+
+            _log_event(task.id, 'released', agent=old_agent, details={
+                'reason': f'Reclaim from timed_out, attempt {task.attempts}/{task.max_attempts}',
+            })
+
+            # Auto-transition to pending
+            task.status = 'pending'
+            task.updated_at = now
+            _log_event(task.id, 'requeued', details={
+                'attempts': task.attempts,
+                'max_attempts': task.max_attempts,
+                'reason': 'auto-reclaim after timeout',
+            })
+            released_count += 1
+            results.append({
+                'task_id': task.id,
+                'action': 'released',
+                'attempts': task.attempts,
+            })
+        else:
+            # Max attempts reached — mark dead
+            task.status = 'dead'
+            task.completed_at = now
+            task.updated_at = now
+            task.last_error = f'Max attempts ({task.attempts}/{task.max_attempts}) reached after timeouts'
+
+            _log_event(task.id, 'dead', details={
+                'reason': f'Max attempts ({task.attempts}/{task.max_attempts}) reached via reclaim-timeouts',
+            })
+            dead_count += 1
+            results.append({
+                'task_id': task.id,
+                'action': 'dead',
+                'attempts': task.attempts,
+            })
+
+    db.session.commit()
+    return jsonify({
+        'checked': len(timed_out_tasks),
+        'released': released_count,
+        'dead': dead_count,
+        'results': results,
+    })
+
+
+# ── Overseer: dashboard ─────────────────────────────────
+
+@api_bp.route('/overseer/dashboard', methods=['GET'])
+def overseer_dashboard():
+    """Summary stats for the overseer dashboard."""
+    now = datetime.now(timezone.utc)
+
+    # Tasks by status
+    by_status = {}
+    for s in ['pending', 'assigned', 'claimed', 'in_progress', 'submitted',
+              'in_review', 'completed', 'failed', 'blocked', 'needs_human',
+              'needs_vesper', 'needs_revision', 'timed_out', 'released', 'dead']:
+        count = Task.query.filter_by(status=s).count()
+        if count > 0:
+            by_status[s] = count
+
+    # Agent load info
+    agent_load = {}
+    for agent in Agent.query.all():
+        active = Task.query.filter(
+            Task.claimed_by == agent.name,
+            Task.status.in_(['claimed', 'in_progress'])
+        ).count()
+        assigned = Task.query.filter_by(
+            assigned_to=agent.name, status='assigned'
+        ).count()
+        available_slots = agent.max_concurrent - active
+        agent_load[agent.name] = {
+            'active': active,
+            'assigned': assigned,
+            'max_concurrent': agent.max_concurrent,
+            'available_slots': max(0, available_slots),
+            'status': agent.status,
+            'skills': agent.skills,
+            'reputation_score': agent.reputation_score,
+        }
+
+    # Recent events (last 20)
+    recent_events = EventLog.query.order_by(
+        EventLog.created_at.desc()
+    ).limit(20).all()
+
+    # Stats
+    total_tasks = Task.query.count()
+    locked_count = Task.query.filter(Task.status.in_(['claimed', 'in_progress'])).count()
+    timed_out_count = Task.query.filter_by(status='timed_out').count()
+
+    return jsonify({
+        'total_tasks': total_tasks,
+        'by_status': by_status,
+        'agent_load': agent_load,
+        'locked_tasks': locked_count,
+        'timed_out_tasks': timed_out_count,
+        'recent_events': [e.to_dict() for e in recent_events],
+        'checked_at': now.isoformat(),
+    })
