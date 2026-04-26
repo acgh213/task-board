@@ -21,7 +21,7 @@ def _log_event(task_id, event_type, agent=None, details=None):
     log = EventLog(
         task_id=task_id,
         event_type=event_type,
-        agent=agent or _get_email(),
+        agent=agent,  # None for human-triggered events
         details=json.dumps(details or {}),
     )
     db.session.add(log)
@@ -273,8 +273,10 @@ def claim_task(task_id):
 def start_task(task_id):
     task = Task.query.get_or_404(task_id)
     data = request.get_json() or {}
-    agent_name = data.get('agent', _get_email())
+    agent_name = data.get('agent')
 
+    if not agent_name:
+        return jsonify({"error": "agent name required"}), 400
     ok, err = _validate_transition(task, 'in_progress')
     if not ok:
         return jsonify({'error': err}), 409
@@ -299,8 +301,10 @@ def start_task(task_id):
 def submit_task(task_id):
     task = Task.query.get_or_404(task_id)
     data = request.get_json() or {}
-    agent_name = data.get('agent', _get_email())
+    agent_name = data.get('agent')
 
+    if not agent_name:
+        return jsonify({"error": "agent name required"}), 400
     ok, err = _validate_transition(task, 'submitted')
     if not ok:
         return jsonify({'error': err}), 409
@@ -443,8 +447,10 @@ def review_task(task_id):
 def task_heartbeat(task_id):
     task = Task.query.get_or_404(task_id)
     data = request.get_json() or {}
-    agent_name = data.get('agent', _get_email())
+    agent_name = data.get('agent')
 
+    if not agent_name:
+        return jsonify({"error": "agent name required"}), 400
     if task.status not in ('claimed', 'in_progress'):
         return jsonify({'error': f'Task is in status {task.status}, heartbeat only valid for claimed/in_progress'}), 409
 
@@ -645,7 +651,7 @@ def global_events():
 def agent_heartbeat():
     """Agent-level heartbeat: update agent's last_heartbeat and status."""
     data = request.get_json() or {}
-    agent_name = data.get('agent', _get_email())
+    agent_name = data.get('agent')
 
     if not agent_name:
         return jsonify({'error': 'agent name required'}), 400
