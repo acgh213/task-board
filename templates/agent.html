@@ -1,13 +1,24 @@
 {% extends "base.html" %}
 {% block title %}{{ agent.display_name }} — Agent Details{% endblock %}
 
+{% block breadcrumbs %}
+<nav class="breadcrumbs">
+    <a href="/">Dashboard</a>
+    <span class="breadcrumb-sep">›</span>
+    <a href="/agents">Agents</a>
+    <span class="breadcrumb-sep">›</span>
+    <span>{{ agent.display_name }}</span>
+</nav>
+{% endblock %}
+
 {% block content %}
 <div class="agent-detail">
     <div class="agent-detail-header">
-        <a href="/" class="back-link">← Back to Dashboard</a>
+        <a href="/agents" class="back-link">← Back to Agents</a>
         <div class="agent-detail-title-row">
             <h1>{{ agent.display_name }}</h1>
             <span class="status-badge large {{ agent.status }}">{{ agent.status }}</span>
+            <a href="/agent/{{ agent.name }}/edit" class="cmd-btn cmd-btn-primary edit-agent-btn">✎ Edit</a>
         </div>
         <div class="agent-detail-meta">
             <span class="agent-model">{{ agent.model }}</span>

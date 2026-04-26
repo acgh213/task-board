@@ -37,7 +37,7 @@ class Config:
     SECRET_KEY = os.environ.get('SECRET_KEY', 'dev-key-change-in-prod')
     SQLALCHEMY_DATABASE_URI = os.environ.get(
         'DATABASE_URL',
-        f'sqlite:///{os.path.join(INSTANCE_DIR, "task_board.db")}'
+        'sqlite:////home/exedev/task-board/taskboard.db'
     )
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     LEASE_DURATION = timedelta(minutes=5)

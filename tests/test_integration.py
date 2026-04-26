@@ -93,7 +93,7 @@ class TestFullLifecycle:
         assert resp.get_json()['status'] == 'in_progress'
 
         # --- Step 5: Submit work ---
-        resp = client.post(f'/api/tasks/{task_id}/submit', json={
+        resp = client.post(f'/api/tasks/{task_id}/submit?skip_wait=true', json={
             'agent': 'coder',
             'result': 'Integration test passed successfully'
         })
@@ -155,7 +155,7 @@ class TestFullLifecycle:
         client.post(f'/api/tasks/{task_id}/start', json={'agent': 'coder'})
 
         # --- Step 5: Submit work ---
-        client.post(f'/api/tasks/{task_id}/submit', json={
+        client.post(f'/api/tasks/{task_id}/submit?skip_wait=true', json={
             'agent': 'coder',
             'result': 'Flaky result'
         })
@@ -277,7 +277,7 @@ class TestFullLifecycle:
 
         # --- Step 7: Start, submit, and approve ---
         client.post(f'/api/tasks/{task_id}/start', json={'agent': 'editor'})
-        client.post(f'/api/tasks/{task_id}/submit', json={
+        client.post(f'/api/tasks/{task_id}/submit?skip_wait=true', json={
             'agent': 'editor',
             'result': 'Re-claimed and completed by editor'
         })
@@ -303,7 +303,7 @@ class TestFullLifecycle:
         """Test that submitting a pending task returns 409."""
         resp = client.post('/api/tasks', json={'title': 'Never claimed'})
         task_id = resp.get_json()['id']
-        resp = client.post(f'/api/tasks/{task_id}/submit', json={'agent': 'coder', 'result': 'Should fail'})
+        resp = client.post(f'/api/tasks/{task_id}/submit?skip_wait=true', json={'agent': 'coder', 'result': 'Should fail'})
         assert resp.status_code == 409
 
     def test_cannot_review_without_submit(self, app, client):
@@ -328,7 +328,7 @@ class TestFullLifecycle:
         client.post(f'/api/tasks/{task_id}/assign', json={'agent': 'coder'})
         client.post(f'/api/tasks/{task_id}/claim', json={'agent': 'coder'})
         client.post(f'/api/tasks/{task_id}/start', json={'agent': 'coder'})
-        client.post(f'/api/tasks/{task_id}/submit', json={'agent': 'coder', 'result': 'Done'})
+        client.post(f'/api/tasks/{task_id}/submit?skip_wait=true', json={'agent': 'coder', 'result': 'Done'})
         client.post(f'/api/tasks/{task_id}/review', json={'reviewer': 'editor', 'decision': 'approve'})
         resp = client.post(f'/api/tasks/{task_id}/claim', json={'agent': 'editor'})
         assert resp.status_code == 409
@@ -341,7 +341,7 @@ class TestFullLifecycle:
         client.post(f'/api/tasks/{task_id}/assign', json={'agent': 'coder'})
         client.post(f'/api/tasks/{task_id}/claim', json={'agent': 'coder'})
         client.post(f'/api/tasks/{task_id}/start', json={'agent': 'coder'})
-        client.post(f'/api/tasks/{task_id}/submit', json={'agent': 'coder', 'result': 'Broken'})
+        client.post(f'/api/tasks/{task_id}/submit?skip_wait=true', json={'agent': 'coder', 'result': 'Broken'})
         client.post(f'/api/tasks/{task_id}/review', json={'reviewer': 'editor', 'decision': 'reject', 'feedback': 'Broke'})
         resp = client.post(f'/api/tasks/{task_id}/claim', json={'agent': 'editor'})
         assert resp.status_code == 409
@@ -362,7 +362,7 @@ class TestFullLifecycle:
         client.post(f'/api/tasks/{task_id}/assign', json={'agent': 'coder'})
         client.post(f'/api/tasks/{task_id}/claim', json={'agent': 'coder'})
         client.post(f'/api/tasks/{task_id}/start', json={'agent': 'coder'})
-        resp = client.post(f'/api/tasks/{task_id}/submit', json={'agent': 'coder'})
+        resp = client.post(f'/api/tasks/{task_id}/submit?skip_wait=true', json={'agent': 'coder'})
         assert resp.status_code == 400
 
     def test_review_requires_decision(self, app, client):
@@ -372,7 +372,7 @@ class TestFullLifecycle:
         client.post(f'/api/tasks/{task_id}/assign', json={'agent': 'coder'})
         client.post(f'/api/tasks/{task_id}/claim', json={'agent': 'coder'})
         client.post(f'/api/tasks/{task_id}/start', json={'agent': 'coder'})
-        client.post(f'/api/tasks/{task_id}/submit', json={'agent': 'coder', 'result': 'Done'})
+        client.post(f'/api/tasks/{task_id}/submit?skip_wait=true', json={'agent': 'coder', 'result': 'Done'})
         resp = client.post(f'/api/tasks/{task_id}/review', json={'reviewer': 'editor'})
         assert resp.status_code == 400
 
@@ -451,7 +451,7 @@ class TestAutoAssignFullLifecycle:
         assert resp.get_json()['status'] == 'in_progress'
 
         # --- Step 6: Submit work ---
-        resp = client.post(f'/api/tasks/{task_id}/submit', json={
+        resp = client.post(f'/api/tasks/{task_id}/submit?skip_wait=true', json={
             'agent': 'coder',
             'result': 'Auto-assign lifecycle test passed',
         })

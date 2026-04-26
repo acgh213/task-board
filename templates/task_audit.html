@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% block title %}Task #{{ task.id }} Audit — Command Center{% endblock %}
+
+{% block breadcrumbs %}
+<nav class="breadcrumbs">
+    <a href="/">Dashboard</a>
+    <span class="breadcrumb-sep">›</span>
+    <a href="/tasks">Tasks</a>
+    <span class="breadcrumb-sep">›</span>
+    <a href="/task/{{ task.id }}">Task #{{ task.id }}</a>
+    <span class="breadcrumb-sep">›</span>
+    <span>Audit Trail</span>
+</nav>
+{% endblock %}
+
+{% block content %}
+<div class="audit-page">
+    <div class="audit-header">
+        <a href="/task/{{ task.id }}" class="back-link">← Back to Task</a>
+        <h1>⧫ Audit Trail: <span class="audit-task-title">{{ task.title }}</span></h1>
+        <div class="audit-task-meta">
+            <span class="status-badge large {{ task.status }}">{{ task.status }}</span>
+            <span class="audit-task-id">#{{ task.id }}</span>
+        </div>
+    </div>
+
+    {% if audit and audit.lifecycle %}
+    <div class="audit-timeline">
+        {% for event in audit.lifecycle %}
+        <div class="audit-event audit-event-{{ event.event_type | replace('_', '-') }}">
+            <div class="audit-event-dot"></div>
+            <div class="audit-event-line"></div>
+            <div class="audit-event-body">
+                <div class="audit-event-header">
+                    <span class="audit-event-type event-type-badge event-{{ event.event_type }}">{{ event.event_type }}</span>
+                    <span class="audit-event-ts">{{ event.timestamp }}</span>
+                </div>
+                <div class="audit-event-details">
+                    {% if event.actor %}
+                    <span class="audit-detail-item">
+                        <span class="audit-detail-label">Actor</span>
+                        <span class="audit-detail-value agent-link">{{ event.actor }}</span>
+                    </span>
+                    {% endif %}
+                    {% if event.status_before or event.status_after %}
+                    <span class="audit-detail-item">
+                        <span class="audit-detail-label">Transition</span>
+                        <span class="audit-detail-value">
+                            {% if event.status_before %}
+                            <span class="status-badge small {{ event.status_before }}">{{ event.status_before }}</span>
+                            {% else %}
+                            <span class="status-badge small" style="opacity:0.4;">—</span>
+                            {% endif %}
+                            <span class="audit-arrow">→</span>
+                            {% if event.status_after %}
+                            <span class="status-badge small {{ event.status_after }}">{{ event.status_after }}</span>
+                            {% else %}
+                            <span class="status-badge small" style="opacity:0.4;">—</span>
+                            {% endif %}
+                        </span>
+                    </span>
+                    {% endif %}
+                    {% if event.claimed_by_before is not none or event.claimed_by_after is not none %}
+                    <span class="audit-detail-item">
+                        <span class="audit-detail-label">Claimed By</span>
+                        <span class="audit-detail-value agent-link">
+                            {% if event.claimed_by_before %}{{ event.claimed_by_before }}{% else %}—{% endif %}
+                            <span class="audit-arrow">→</span>
+                            {% if event.claimed_by_after %}{{ event.claimed_by_after }}{% else %}—{% endif %}
+                        </span>
+                    </span>
+                    {% endif %}
+                    {% if event.xp_awarded is not none %}
+                    <span class="audit-detail-item xp-item">
+                        <span class="audit-detail-label">XP</span>
+                        <span class="audit-detail-value xp-value">+{{ event.xp_awarded }} XP</span>
+                    </span>
+                    {% endif %}
+                    {% if event.handoff_id %}
+                    <span class="audit-detail-item">
+                        <span class="audit-detail-label">Handoff</span>
+                        <span class="audit-detail-value">#{{ event.handoff_id }}</span>
+                    </span>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    <div class="detail-card audit-summary">
+        <h3>⧇ Audit Summary</h3>
+        <div class="audit-summary-grid">
+            <div class="audit-summary-item">
+                <span class="audit-summary-label">Total Events</span>
+                <span class="audit-summary-value">{{ audit.summary.total_events if audit.summary else audit.total_events }}</span>
+            </div>
+            <div class="audit-summary-item">
+                <span class="audit-summary-label">Total XP Awarded</span>
+                <span class="audit-summary-value xp-value">{{ audit.summary.total_xp_awarded if audit.summary else audit.total_xp }} XP</span>
+            </div>
+            <div class="audit-summary-item">
+                <span class="audit-summary-label">Agents Involved</span>
+                <span class="audit-summary-value">
+                    {% set agents = audit.summary.agents_involved if audit.summary else audit.agents_involved %}
+                    {{ agents | join(', ') if agents else '—' }}
+                </span>
+            </div>
+            <div class="audit-summary-item">
+                <span class="audit-summary-label">Handoffs</span>
+                <span class="audit-summary-value">{{ audit.summary.handoffs if audit.summary else audit.handoffs_count }}</span>
+            </div>
+        </div>
+    </div>
+    {% else %}
+    <div class="detail-card">
+        <div class="empty-state">No audit events recorded for this task.</div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

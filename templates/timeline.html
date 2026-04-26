@@ -1,0 +1,189 @@
+{% extends "base.html" %}
+{% block title %}Task #{{ task.id }} Timeline — Task Board{% endblock %}
+
+{% block content %}
+<div class="task-detail">
+    <div class="task-detail-header">
+        <a href="/task/{{ task.id }}" class="back-link">← Back to Task</a>
+        <a href="/" class="back-link" style="margin-left:12px;">← Dashboard</a>
+        <h1>Timeline: {{ task.title }}</h1>
+        <span class="status-badge large {{ task.status }}">{{ task.status }}</span>
+    </div>
+
+    <div class="detail-card">
+        <h3>Task Summary</h3>
+        <div class="detail-row">
+            <span class="detail-label">ID</span>
+            <span class="detail-value">#{{ task.id }}</span>
+        </div>
+        <div class="detail-row">
+            <span class="detail-label">Priority</span>
+            <span class="detail-value priority priority-{{ task.priority }}">P{{ task.priority }}</span>
+        </div>
+        <div class="detail-row">
+            <span class="detail-label">Project</span>
+            <span class="detail-value">{{ task.project }}</span>
+        </div>
+        <div class="detail-row">
+            <span class="detail-label">Tags</span>
+            <span class="detail-value">{{ task.tags or '—' }}</span>
+        </div>
+    </div>
+
+    <!-- Timeline -->
+    <div class="timeline-container" style="margin-top:24px;">
+        <h2>📅 Full Lifecycle</h2>
+        {% if events or reviews %}
+        <div class="timeline">
+            {% set all_events = [] %}
+            {% for event in events %}
+                {% set _ = all_events.append({
+                    'type': 'event',
+                    'time': event.created_at,
+                    'event_type': event.event_type,
+                    'agent': event.agent,
+                    'details': event.details,
+                    'id': event.id
+                }) %}
+            {% endfor %}
+            {% for review in reviews %}
+                {% set _ = all_events.append({
+                    'type': 'review',
+                    'time': review.created_at,
+                    'event_type': 'review_' ~ review.decision,
+                    'agent': review.reviewer,
+                    'details': {'decision': review.decision, 'feedback': review.feedback},
+                    'id': 'rev-' ~ review.id
+                }) %}
+            {% endfor %}
+
+            {% set sorted = all_events|sort(attribute='time') %}
+
+            {% for entry in sorted %}
+            <div class="timeline-entry {{ entry.event_type }}">
+                <div class="timeline-marker {{ entry.event_type }}"></div>
+                <div class="timeline-content">
+                    <div class="timeline-header">
+                        <span class="event-type-badge event-{{ entry.event_type }}">
+                            {% if entry.type == 'review' %}
+                                Review: {{ entry.details.get('decision', '') }}
+                            {% else %}
+                                {{ entry.event_type }}
+                            {% endif %}
+                        </span>
+                        <span class="timeline-agent">{{ entry.agent or 'system' }}</span>
+                        <span class="timeline-time">{{ entry.time.strftime('%Y-%m-%d %H:%M:%S') if entry.time else '' }}</span>
+                    </div>
+                    {% if entry.details and entry.details is mapping %}
+                    <div class="timeline-details">
+                        {% for k, v in entry.details.items() %}
+                            {% if v %}
+                            <span class="detail-chip">
+                                <strong>{{ k }}:</strong> {{ v }}
+                            </span>
+                            {% endif %}
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="empty-state">No events recorded for this task yet.</div>
+        {% endif %}
+    </div>
+</div>
+
+<style>
+.timeline {
+    position: relative;
+    padding-left: 32px;
+    margin: 16px 0;
+}
+.timeline::before {
+    content: '';
+    position: absolute;
+    left: 12px;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: #444;
+}
+.timeline-entry {
+    position: relative;
+    margin-bottom: 16px;
+    padding: 12px 16px;
+    background: #1e1e2e;
+    border-radius: 8px;
+    border: 1px solid #2d2d44;
+}
+.timeline-marker {
+    position: absolute;
+    left: -24px;
+    top: 14px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #444;
+    border: 2px solid #1e1e2e;
+}
+.timeline-marker.task_created { background: #4ade80; }
+.timeline-marker.assigned { background: #60a5fa; }
+.timeline-marker.claimed { background: #a78bfa; }
+.timeline-marker.in_progress { background: #f59e0b; }
+.timeline-marker.submitted { background: #06b6d4; }
+.timeline-marker.in_review { background: #8b5cf6; }
+.timeline-marker.completed { background: #22c55e; }
+.timeline-marker.failed { background: #ef4444; }
+.timeline-marker.review_approve { background: #22c55e; }
+.timeline-marker.review_reject { background: #ef4444; }
+.timeline-marker.review_request_changes { background: #f59e0b; }
+.timeline-marker.heartbeat { background: #6366f1; }
+.timeline-marker.released { background: #fb923c; }
+.timeline-marker.requeued { background: #fbbf24; }
+.timeline-marker.dead { background: #991b1b; }
+.timeline-marker.timed_out { background: #dc2626; }
+.timeline-marker.blocked { background: #eab308; }
+.timeline-marker.needs_human { background: #f97316; }
+.timeline-marker.needs_vesper { background: #a855f7; }
+.timeline-marker.escalated { background: #e11d48; }
+.timeline-marker.resolved { background: #22d3ee; }
+
+.timeline-content {
+    flex: 1;
+}
+.timeline-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 4px;
+}
+.timeline-agent {
+    color: #94a3b8;
+    font-size: 0.85em;
+}
+.timeline-time {
+    color: #64748b;
+    font-size: 0.8em;
+    margin-left: auto;
+}
+.timeline-details {
+    margin-top: 6px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+.detail-chip {
+    background: #2d2d44;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.8em;
+    color: #cbd5e1;
+}
+.detail-chip strong {
+    color: #94a3b8;
+}
+</style>
+{% endblock %}

@@ -3,27 +3,62 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}Task Board{% endblock %}</title>
+    <title>{% block title %}Command Center{% endblock %}</title>
     <link rel="stylesheet" href="/static/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 </head>
 <body>
+    <div class="scanlines"></div>
+    <div class="grid-bg"></div>
     <nav class="navbar">
         <div class="nav-brand">
-            <a href="/">⚡ Task Board</a>
+            <a href="/">✦ Command Center</a>
         </div>
-        <div class="nav-links">
-            <a href="/">Dashboard</a>
-            <a href="/">Tasks</a>
-            <a href="/">Agents</a>
-            <a href="/">Stats</a>
+        <button class="hamburger" id="hamburger-btn" aria-label="Toggle navigation">
+            <span></span>
+            <span></span>
+            <span></span>
+        </button>
+        <div class="nav-links" id="nav-links">
+            <a href="/" class="{% if request.path == '/' %}nav-active{% endif %}">Dashboard</a>
+            <a href="/tasks" class="{% if request.path == '/tasks' %}nav-active{% endif %}">Tasks</a>
+            <a href="/agents" class="{% if request.path == '/agents' %}nav-active{% endif %}">Agents</a>
+            <a href="/stats" class="{% if request.path == '/stats' %}nav-active{% endif %}">Stats</a>
+        </div>
+        <div class="nav-sys-status">
+            <span class="sys-led online"></span> SYS.ONLINE
         </div>
     </nav>
     <main class="container">
+        {% block breadcrumbs %}{% endblock %}
         {% block content %}{% endblock %}
     </main>
     <footer class="footer">
-        <p>Hermes Task Board — Agent Task Queue</p>
+        <p>✦ Command Center — Starship Operations Dashboard v2.0 ✦</p>
     </footer>
+
+    <!-- Hamburger toggle script -->
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        var hamburger = document.getElementById('hamburger-btn');
+        var navLinks = document.getElementById('nav-links');
+        if (hamburger && navLinks) {
+            hamburger.addEventListener('click', function() {
+                hamburger.classList.toggle('active');
+                navLinks.classList.toggle('nav-open');
+            });
+            // Close menu on link click
+            navLinks.querySelectorAll('a').forEach(function(link) {
+                link.addEventListener('click', function() {
+                    hamburger.classList.remove('active');
+                    navLinks.classList.remove('nav-open');
+                });
+            });
+        }
+    });
+    </script>
+
     {% block scripts %}{% endblock %}
 </body>
 </html>

@@ -1,10 +1,13 @@
 # api.py
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date, timedelta
 from flask import Blueprint, request, jsonify
-from models import db, Task, TaskTemplate, Agent, Review, EventLog, STATE_TRANSITIONS
+from models import db, Task, TaskTemplate, Agent, Review, EventLog, HandoffRequest, STATE_TRANSITIONS
+from models import Achievement, AgentBadge
 from models import ESCALATION_TAGS_HUMAN, ESCALATION_TAGS_VESPER
 from config import Config
+from ws import socketio
+from schemas import AgentMessage, TextPart, DataPart, FilePart, HandoffRequest as HandoffRequestSchema, HandoffResponse
 
 api_bp = Blueprint('api', __name__)
 
@@ -26,6 +29,30 @@ def _log_event(task_id, event_type, agent=None, details=None):
     )
     db.session.add(log)
     return log
+
+
+# ── SocketIO event emission ────────────────
+
+def _emit_task_update(task):
+    """Emit a SocketIO event with the full task data after a state change."""
+    try:
+        socketio.emit('task_update', task.to_dict())
+    except Exception:
+        pass
+
+def _emit_agent_update(agent):
+    """Emit a SocketIO event with the full agent data after a state change."""
+    try:
+        socketio.emit('agent_update', agent.to_dict())
+    except Exception:
+        pass
+
+def _emit_new_event(event):
+    """Emit a SocketIO event when a new event log entry is created."""
+    try:
+        socketio.emit('new_event', event.to_dict())
+    except Exception:
+        pass
 
 
 def _get_agent_or_create(name, display_name=None, model=None):
@@ -55,6 +82,30 @@ def _validate_transition(task, new_status):
 def _check_escalation_tags(task):
     """Auto-escalate if task tags match dangerous patterns. Delegates to model method."""
     return task.check_escalation_tags()
+
+
+# ── Dependency resolution ────────────────────
+
+def _resolve_dependencies(task, target_status='pending'):
+    """Check if any tasks blocked by this completed task can now be unblocked.
+    Returns list of (task_id, old_status, new_status) for auto-transitioned tasks."""
+    if task.status != 'completed' or not task.id:
+        return []
+    transitions = []
+    for dep_task in task.get_dependent_tasks():
+        if dep_task.status == 'blocked' and dep_task.are_dependencies_met():
+            old_status = dep_task.status
+            dep_task.status = target_status
+            dep_task.updated_at = datetime.now(timezone.utc)
+            _log_event(dep_task.id, 'dependency_resolved', details={
+                'blocking_task_id': task.id,
+                'from_status': old_status,
+                'to_status': target_status,
+                'reason': f'Blocking task {task.id} completed, all dependencies met',
+            })
+            transitions.append((dep_task.id, old_status, target_status))
+            _emit_task_update(dep_task)
+    return transitions
 
 
 # ── Task CRUD ───────────────────────────────
@@ -124,10 +175,15 @@ def create_task():
     if not isinstance(priority, int) or priority < 1 or priority > 5:
         return jsonify({'error': 'priority must be integer 1-5'}), 400
 
+    complexity = data.get('complexity', 3)
+    if not isinstance(complexity, int) or complexity < 1 or complexity > 5:
+        return jsonify({'error': 'complexity must be integer 1-5'}), 400
+
     task = Task(
         title=title,
         description=data.get('description', ''),
         priority=priority,
+        complexity=complexity,
         tags=data.get('tags', ''),
         project=data.get('project', 'general'),
         reserved_for=data.get('reserved_for', None),
@@ -137,6 +193,8 @@ def create_task():
     escalate_to = _check_escalation_tags(task)
     if escalate_to:
         task.status = escalate_to
+    elif data.get('start_in_triage', False):
+        task.status = 'triage'
 
     db.session.add(task)
     db.session.flush()
@@ -147,6 +205,21 @@ def create_task():
         'status': task.status,
     })
 
+    # Vesper XP: if task created by authenticated user 'vesper', grant +10 XP
+    email = _get_email()
+    if email == 'vesper':
+        _get_agent_or_create('vesper', display_name='Vesper', model='deepseek-v4-flash')
+        agent = db.session.get(Agent, 'vesper')
+        if agent:
+            agent.xp = (agent.xp or 0) + 10
+            agent.compute_level()
+            _log_event(task.id, 'xp_gained', agent='vesper', details={
+                'xp_gained': 10,
+                'total_xp': agent.xp,
+                'level': agent.level,
+                'reason': 'Task creation by Vesper',
+            })
+
     if escalate_to:
         _log_event(task.id, 'escalated', details={
             'from_status': 'pending',
@@ -155,7 +228,259 @@ def create_task():
         })
 
     db.session.commit()
+    _emit_task_update(task)
     return jsonify(task.to_dict()), 201
+
+
+# ── Triage Endpoints ────────────────────────
+
+@api_bp.route('/tasks/<int:task_id>/triage/accept', methods=['POST'])
+def triage_accept(task_id):
+    """Accept a task from triage → pending."""
+    task = Task.query.get_or_404(task_id)
+    ok, err = _validate_transition(task, 'pending')
+    if not ok:
+        return jsonify({'error': err}), 409
+
+    now = datetime.now(timezone.utc)
+    task.status = 'pending'
+    task.updated_at = now
+
+    _log_event(task.id, 'triage_accepted', details={
+        'from_status': 'triage',
+        'to_status': 'pending',
+    })
+
+    db.session.commit()
+    _emit_task_update(task)
+    return jsonify(task.to_dict())
+
+
+@api_bp.route('/tasks/<int:task_id>/triage/assign', methods=['POST'])
+def triage_assign(task_id):
+    """Assign a task from triage → assigned (with agent)."""
+    task = Task.query.get_or_404(task_id)
+    data = request.get_json() or {}
+    agent_name = data.get('agent')
+
+    if not agent_name:
+        return jsonify({'error': 'agent name required'}), 400
+
+    ok, err = _validate_transition(task, 'assigned')
+    if not ok:
+        return jsonify({'error': err}), 409
+
+    _get_agent_or_create(agent_name)
+
+    now = datetime.now(timezone.utc)
+    task.status = 'assigned'
+    task.assigned_to = agent_name
+    task.assigned_at = now
+    task.updated_at = now
+
+    _log_event(task.id, 'triage_assigned', agent=agent_name, details={
+        'from_status': 'triage',
+        'to_status': 'assigned',
+        'assigned_to': agent_name,
+    })
+
+    db.session.commit()
+    _emit_task_update(task)
+    return jsonify(task.to_dict())
+
+
+@api_bp.route('/tasks/<int:task_id>/triage/reject', methods=['POST'])
+def triage_reject(task_id):
+    """Reject a task from triage → failed with reason."""
+    task = Task.query.get_or_404(task_id)
+    data = request.get_json() or {}
+    reason = data.get('reason', 'Rejected in triage')
+
+    ok, err = _validate_transition(task, 'failed')
+    if not ok:
+        return jsonify({'error': err}), 409
+
+    now = datetime.now(timezone.utc)
+    task.status = 'failed'
+    task.last_error = reason
+    task.failure_reason = 'triage_rejected'
+    task.updated_at = now
+
+    _log_event(task.id, 'triage_rejected', details={
+        'from_status': 'triage',
+        'to_status': 'failed',
+        'reason': reason,
+    })
+
+    db.session.commit()
+    _emit_task_update(task)
+    return jsonify(task.to_dict())
+
+
+# ── Triage Queue Enhancements (Task #5) ─────
+
+@api_bp.route('/tasks/triage', methods=['GET'])
+def list_triage_tasks():
+    """List all tasks in triage status."""
+    query = Task.query.filter_by(status='triage')
+    try:
+        page = int(request.args.get('page', 1))
+    except (ValueError, TypeError):
+        page = 1
+    try:
+        per_page = int(request.args.get('per_page', 50))
+    except (ValueError, TypeError):
+        per_page = 50
+    if page < 1:
+        page = 1
+    if per_page < 1:
+        per_page = 50
+    total = query.count()
+    tasks = query.order_by(Task.priority, Task.created_at).offset(
+        (page - 1) * per_page).limit(per_page).all()
+    return jsonify({
+        'tasks': [t.to_dict() for t in tasks],
+        'total': total,
+        'page': page,
+        'per_page': per_page,
+    })
+
+
+@api_bp.route('/triage/stats', methods=['GET'])
+def triage_stats():
+    """Return statistics about the triage queue."""
+    triage_tasks = Task.query.filter_by(status='triage').all()
+    total = len(triage_tasks)
+    by_priority = {}
+    by_complexity = {}
+    for t in triage_tasks:
+        p = t.priority or 3
+        by_priority[p] = by_priority.get(p, 0) + 1
+        c = t.complexity or 3
+        by_complexity[c] = by_complexity.get(c, 0) + 1
+    escalation_count = 0
+    for t in triage_tasks:
+        if t.check_escalation_tags():
+            escalation_count += 1
+    return jsonify({
+        'total_in_triage': total,
+        'by_priority': by_priority,
+        'by_complexity': by_complexity,
+        'escalation_prone': escalation_count,
+    })
+
+
+@api_bp.route('/triage/bulk-accept', methods=['POST'])
+def triage_bulk_accept():
+    """Accept all tasks currently in triage into pending status."""
+    data = request.get_json() or {}
+    task_ids = data.get('task_ids')
+    now = datetime.now(timezone.utc)
+    accepted = []
+    skipped = []
+    if task_ids is not None:
+        for tid in task_ids:
+            task = db.session.get(Task, tid)
+            if not task:
+                skipped.append({'task_id': tid, 'reason': 'not_found'})
+                continue
+            if task.status != 'triage':
+                skipped.append({'task_id': tid, 'reason': f'status_is_{task.status}'})
+                continue
+            ok, err = _validate_transition(task, 'pending')
+            if not ok:
+                skipped.append({'task_id': tid, 'reason': err})
+                continue
+            task.status = 'pending'
+            task.updated_at = now
+            _log_event(task.id, 'triage_accepted', details={
+                'from_status': 'triage', 'to_status': 'pending',
+                'bulk': True,
+            })
+            accepted.append(task.id)
+    else:
+        for task in Task.query.filter_by(status='triage').all():
+            ok, err = _validate_transition(task, 'pending')
+            if not ok:
+                skipped.append({'task_id': task.id, 'reason': err})
+                continue
+            task.status = 'pending'
+            task.updated_at = now
+            _log_event(task.id, 'triage_accepted', details={
+                'from_status': 'triage', 'to_status': 'pending',
+                'bulk': True,
+            })
+            accepted.append(task.id)
+    db.session.commit()
+    for tid in accepted:
+        t = db.session.get(Task, tid)
+        if t:
+            _emit_task_update(t)
+    return jsonify({
+        'accepted': len(accepted),
+        'skipped': len(skipped),
+        'accepted_ids': accepted,
+        'skipped': skipped,
+    })
+
+
+@api_bp.route('/triage/bulk-reject', methods=['POST'])
+def triage_bulk_reject():
+    """Reject all tasks currently in triage, moving them to failed."""
+    data = request.get_json() or {}
+    task_ids = data.get('task_ids')
+    reason = data.get('reason', 'Bulk rejected in triage')
+    now = datetime.now(timezone.utc)
+    rejected = []
+    skipped = []
+    if task_ids is not None:
+        for tid in task_ids:
+            task = db.session.get(Task, tid)
+            if not task:
+                skipped.append({'task_id': tid, 'reason': 'not_found'})
+                continue
+            if task.status != 'triage':
+                skipped.append({'task_id': tid, 'reason': f'status_is_{task.status}'})
+                continue
+            ok, err = _validate_transition(task, 'failed')
+            if not ok:
+                skipped.append({'task_id': tid, 'reason': err})
+                continue
+            task.status = 'failed'
+            task.last_error = reason
+            task.failure_reason = 'triage_rejected'
+            task.updated_at = now
+            _log_event(task.id, 'triage_rejected', details={
+                'from_status': 'triage', 'to_status': 'failed',
+                'reason': reason, 'bulk': True,
+            })
+            rejected.append(task.id)
+    else:
+        for task in Task.query.filter_by(status='triage').all():
+            ok, err = _validate_transition(task, 'failed')
+            if not ok:
+                skipped.append({'task_id': task.id, 'reason': err})
+                continue
+            task.status = 'failed'
+            task.last_error = reason
+            task.failure_reason = 'triage_rejected'
+            task.updated_at = now
+            _log_event(task.id, 'triage_rejected', details={
+                'from_status': 'triage', 'to_status': 'failed',
+                'reason': reason, 'bulk': True,
+            })
+            rejected.append(task.id)
+    db.session.commit()
+    for tid in rejected:
+        t = db.session.get(Task, tid)
+        if t:
+            _emit_task_update(t)
+    return jsonify({
+        'rejected': len(rejected),
+        'skipped': len(skipped),
+        'rejected_ids': rejected,
+        'skipped': skipped,
+    })
 
 
 @api_bp.route('/tasks/<int:task_id>', methods=['GET'])
@@ -167,12 +492,253 @@ def get_task(task_id):
     return jsonify(data)
 
 
+@api_bp.route('/tasks/<int:task_id>/audit', methods=['GET'])
+def task_audit_api(task_id):
+    """Return the full lifecycle audit trail for a task.
+
+    Reconstructs claimed_by state across events, extracts XP and handoff data,
+    and provides a summary with total events, XP, agents involved, and handoffs.
+    """
+    task = Task.query.get_or_404(task_id)
+    events = EventLog.query.filter_by(task_id=task_id).order_by(EventLog.created_at).all()
+
+    lifecycle = []
+    # Track state for claimed_by reconstruction
+    current_claimed_by = None
+    total_xp_awarded = 0
+    agents_involved = set()
+    handoffs_count = 0
+
+    for evt in events:
+        details = json.loads(evt.details) if evt.details else {}
+
+        # Extract from_status / to_status from details
+        from_status = details.get('from_status')
+        to_status = details.get('to_status')
+
+        # If no explicit from_status/to_status, try to derive from event type
+        if not from_status and not to_status:
+            if evt.event_type == 'task_created':
+                to_status = details.get('status', 'pending')
+
+        # Reconstruct claimed_by state
+        claimed_by_before = current_claimed_by
+
+        # Update claimed_by tracking based on event type and details
+        if evt.event_type == 'claimed':
+            current_claimed_by = details.get('claimed_by', evt.agent)
+        elif evt.event_type in ('released', 'lease_expired'):
+            current_claimed_by = None
+        elif evt.event_type == 'handoff_accepted':
+            # Handoff accepted: release old claimant
+            current_claimed_by = None
+        elif details.get('claimed_by') is None and 'claimed_by' in details:
+            current_claimed_by = None
+        elif details.get('claimed_by'):
+            current_claimed_by = details['claimed_by']
+        elif evt.event_type == 'assigned':
+            # Assigned does not change claimed_by
+            pass
+        elif evt.event_type in ('completed', 'failed', 'timed_out', 'dead'):
+            # Terminal events: clear claimed_by
+            current_claimed_by = None
+
+        claimed_by_after = current_claimed_by
+
+        # XP extraction: look for xp_gained in details
+        xp_awarded = None
+        if 'xp_gained' in details:
+            xp_awarded = details['xp_gained']
+            total_xp_awarded += int(xp_awarded)
+        elif evt.event_type in ('xp_gained',) and 'xp_gained' in details:
+            xp_awarded = details['xp_gained']
+            total_xp_awarded += int(xp_awarded)
+
+        # Handoff ID extraction
+        handoff_id = details.get('handoff_request_id')
+
+        # Count handoffs (handoff_requested events)
+        if evt.event_type == 'handoff_requested' and handoff_id is not None:
+            handoffs_count += 1
+
+        # Track agents involved
+        if evt.agent:
+            agents_involved.add(evt.agent)
+
+        entry = {
+            'timestamp': evt.created_at.isoformat() if evt.created_at else None,
+            'event_type': evt.event_type,
+            'actor': evt.agent,
+            'status_before': from_status,
+            'status_after': to_status,
+            'claimed_by_before': claimed_by_before,
+            'claimed_by_after': claimed_by_after,
+            'xp_awarded': xp_awarded,
+            'handoff_id': handoff_id,
+            'details': details,
+        }
+        lifecycle.append(entry)
+
+    summary = {
+        'total_events': len(events),
+        'total_xp_awarded': total_xp_awarded,
+        'agents_involved': sorted(list(agents_involved)) if agents_involved else [],
+        'handoffs': handoffs_count,
+        'final_status': task.status,
+    }
+
+    return jsonify({
+        'task_id': task.id,
+        'task_title': task.title,
+        'lifecycle': lifecycle,
+        'summary': summary,
+    })
+
+
 @api_bp.route('/tasks/<int:task_id>', methods=['DELETE'])
 def delete_task(task_id):
     task = Task.query.get_or_404(task_id)
     db.session.delete(task)
     db.session.commit()
     return jsonify({'deleted': task_id})
+
+
+# ── Dependency Endpoints ────────────────────
+
+@api_bp.route('/tasks/<int:task_id>/dependencies', methods=['GET'])
+def get_task_dependencies(task_id):
+    """Return blocking tasks (dependencies) for a task with their status."""
+    task = Task.query.get_or_404(task_id)
+    blocking = task.get_blocking_tasks()
+    return jsonify({
+        'task_id': task.id,
+        'blocked_by': task.blocked_by or '',
+        'dependencies': [{
+            'id': t.id,
+            'title': t.title,
+            'status': t.status,
+        } for t in blocking],
+        'all_met': task.are_dependencies_met(),
+    })
+
+
+@api_bp.route('/tasks/<int:task_id>/block', methods=['POST'])
+def set_task_block(task_id):
+    """Set blocked_by on a task."""
+    task = Task.query.get_or_404(task_id)
+    data = request.get_json() or {}
+    blocked_by_value = data.get('blocked_by', '')
+
+    # Validate
+    cleaned, error = Task.validate_blocked_by(blocked_by_value, task_id=task.id)
+    if error:
+        return jsonify({'error': error}), 400
+
+    now = datetime.now(timezone.utc)
+    task.blocked_by = cleaned
+    task.updated_at = now
+
+    # Auto-transition to 'blocked' if dependencies aren't met
+    if cleaned and not task.are_dependencies_met():
+        if task.can_transition_to('blocked'):
+            task.status = 'blocked'
+            _log_event(task.id, 'blocked', details={
+                'blocked_by': cleaned,
+                'reason': 'Dependencies not met, auto-blocked',
+            })
+        else:
+            # If can't go to blocked from current status, still set blocked_by but log it
+            _log_event(task.id, 'dependency_set', details={
+                'blocked_by': cleaned,
+                'note': 'Task could not auto-transition to blocked from current status',
+            })
+    elif cleaned and task.are_dependencies_met():
+        # All deps already met, can stay or move to pending
+        if task.status == 'blocked':
+            task.status = 'pending'
+            _log_event(task.id, 'dependency_set', details={
+                'blocked_by': cleaned,
+                'reason': 'All dependencies already met, unblocked',
+            })
+        else:
+            _log_event(task.id, 'dependency_set', details={
+                'blocked_by': cleaned,
+            })
+    else:
+        _log_event(task.id, 'dependency_cleared', details={
+            'reason': 'blocked_by was cleared',
+        })
+
+    db.session.commit()
+    _emit_task_update(task)
+    return jsonify(task.to_dict())
+
+
+@api_bp.route('/tasks/<int:task_id>/block/<int:blocking_task_id>', methods=['DELETE'])
+def remove_task_block(task_id, blocking_task_id):
+    """Remove a specific blocking dependency."""
+    task = Task.query.get_or_404(task_id)
+    ids = task.get_blocking_task_ids()
+
+    if blocking_task_id not in ids:
+        return jsonify({'error': f'Task {task_id} is not blocked by task {blocking_task_id}'}), 404
+
+    ids.remove(blocking_task_id)
+    now = datetime.now(timezone.utc)
+    task.blocked_by = ','.join(str(i) for i in ids) if ids else ''
+    task.updated_at = now
+
+    _log_event(task.id, 'dependency_removed', details={
+        'removed_blocking_task_id': blocking_task_id,
+        'remaining_blocked_by': task.blocked_by,
+    })
+
+    # If no more dependencies or all met, unblock
+    if task.are_dependencies_met() and task.status == 'blocked':
+        task.status = 'pending'
+        _log_event(task.id, 'dependency_resolved', details={
+            'reason': f'Removed blocking task {blocking_task_id}, all dependencies met',
+            'from_status': 'blocked',
+            'to_status': 'pending',
+        })
+
+    db.session.commit()
+    _emit_task_update(task)
+    return jsonify(task.to_dict())
+
+
+@api_bp.route('/tasks/<int:task_id>/unblock-all', methods=['POST'])
+def unblock_task(task_id):
+    """Clear all dependencies if all are met."""
+    task = Task.query.get_or_404(task_id)
+
+    if not task.blocked_by:
+        return jsonify({'error': 'Task has no blocked_by dependencies'}), 400
+
+    if not task.are_dependencies_met():
+        return jsonify({'error': 'Not all dependencies are completed'}), 409
+
+    now = datetime.now(timezone.utc)
+    old_blocked_by = task.blocked_by
+    task.blocked_by = ''
+    task.updated_at = now
+
+    if task.status == 'blocked':
+        task.status = 'pending'
+        _log_event(task.id, 'dependency_resolved', details={
+            'reason': 'All dependencies met, unblocked via unblock-all',
+            'from_status': 'blocked',
+            'to_status': 'pending',
+            'cleared_deps': old_blocked_by,
+        })
+    else:
+        _log_event(task.id, 'dependency_cleared', details={
+            'cleared_deps': old_blocked_by,
+        })
+
+    db.session.commit()
+    _emit_task_update(task)
+    return jsonify(task.to_dict())
 
 
 # ── State Machine Endpoints ────────────────
@@ -203,6 +769,7 @@ def assign_task(task_id):
     })
 
     db.session.commit()
+    _emit_task_update(task)
     return jsonify(task.to_dict())
 
 
@@ -266,6 +833,10 @@ def claim_task(task_id):
         agent.last_heartbeat = now
 
     db.session.commit()
+    _emit_task_update(task)
+    agent = db.session.get(Agent, agent_name)
+    if agent:
+        _emit_agent_update(agent)
     return jsonify(task.to_dict())
 
 
@@ -294,6 +865,7 @@ def start_task(task_id):
     _log_event(task.id, 'in_progress', agent=agent_name)
 
     db.session.commit()
+    _emit_task_update(task)
     return jsonify(task.to_dict())
 
 
@@ -305,6 +877,19 @@ def submit_task(task_id):
 
     if not agent_name:
         return jsonify({"error": "agent name required"}), 400
+
+    # Minimum wait time enforcement: at least 5 seconds must pass after claim
+    skip_wait = request.args.get('skip_wait', '').lower() == 'true'
+    if not skip_wait and task.claimed_at:
+        now = datetime.now(timezone.utc)
+        claimed = task.claimed_at
+        if claimed.tzinfo:
+            claimed = claimed.replace(tzinfo=None)
+        now_naive = now.replace(tzinfo=None)
+        elapsed = (now_naive - claimed).total_seconds()
+        if elapsed < 5:
+            return jsonify({'error': 'Agent must work on task for at least 5 seconds before submitting'}), 409
+
     ok, err = _validate_transition(task, 'submitted')
     if not ok:
         return jsonify({'error': err}), 409
@@ -344,6 +929,7 @@ def submit_task(task_id):
         })
 
     db.session.commit()
+    _emit_task_update(task)
     return jsonify(task.to_dict())
 
 
@@ -358,9 +944,9 @@ def review_task(task_id):
     if not decision or decision not in ('approve', 'reject', 'request_changes'):
         return jsonify({'error': 'decision must be approve, reject, or request_changes'}), 400
 
-    # Must be in_review
-    if task.status != 'in_review':
-        return jsonify({'error': f'Task is in status {task.status}, must be in_review to review'}), 409
+    # Must be in_review or assigned (for reviewer handoffs)
+    if task.status not in ('in_review', 'assigned'):
+        return jsonify({'error': f'Task is in status {task.status}, must be in_review or assigned to review'}), 409
 
     # No self-review
     if reviewer == task.claimed_by:
@@ -392,12 +978,30 @@ def review_task(task_id):
         if worker:
             worker.tasks_completed = (worker.tasks_completed or 0) + 1
             worker.status = 'idle'
+            # Update avg_completion_time
+            if task.created_at and task.completed_at:
+                # Both naive UTC (SQLite strips tzinfo on read); ensure consistency
+                created = task.created_at.replace(tzinfo=None) if task.created_at.tzinfo else task.created_at
+                completed = task.completed_at.replace(tzinfo=None) if task.completed_at.tzinfo else task.completed_at
+                delta = (completed - created).total_seconds()
+                if delta >= 0:
+                    prev_avg = worker.avg_completion_time or 0.0
+                    prev_count = (worker.tasks_completed or 0) - 1
+                    if prev_count > 0:
+                        worker.avg_completion_time = (prev_avg * prev_count + delta) / (prev_count + 1)
+                    else:
+                        worker.avg_completion_time = delta
             worker.update_reputation()
+            # Grant XP for approved task completion (Task #9)
+            _grant_xp(worker.name, task, review_decision='approve')
 
         _log_event(task.id, 'completed', agent=reviewer, details={
             'decision': 'approve',
             'reviewer': reviewer,
         })
+
+        # Resolve any tasks blocked by this completed task
+        _resolve_dependencies(task)
 
     elif decision == 'reject':
         ok, err = _validate_transition(task, 'failed')
@@ -437,9 +1041,39 @@ def review_task(task_id):
 
     task.updated_at = now
     db.session.commit()
+    _emit_task_update(task)
+    # Emit agent updates if workers were affected
+    if task.claimed_by:
+        worker = db.session.get(Agent, task.claimed_by)
+        if worker:
+            _emit_agent_update(worker)
+    rev_agent_obj = db.session.get(Agent, reviewer) if reviewer else None
+    if rev_agent_obj:
+        _emit_agent_update(rev_agent_obj)
+
+    # Check for newly earned badges (Task #10)
+    new_badges = []
+    if decision == 'approve' and task.claimed_by:
+        new_badges = _check_badges(task.claimed_by)
+
+    # Vesper XP: grant +5 XP for reviews done by Vesper
+    if reviewer == 'vesper':
+        _get_agent_or_create('vesper', display_name='Vesper', model='deepseek-v4-flash')
+        vesper_agent = db.session.get(Agent, 'vesper')
+        if vesper_agent:
+            vesper_agent.xp = (vesper_agent.xp or 0) + 5
+            vesper_agent.compute_level()
+            _log_event(task.id, 'xp_gained', agent='vesper', details={
+                'xp_gained': 5,
+                'total_xp': vesper_agent.xp,
+                'level': vesper_agent.level,
+                'reason': 'Review by Vesper',
+            })
+
     return jsonify({
         'task': task.to_dict(),
         'review': review.to_dict(),
+        'new_badges': new_badges,
     })
 
 
@@ -471,6 +1105,10 @@ def task_heartbeat(task_id):
 
     _log_event(task.id, 'heartbeat', agent=agent_name)
     db.session.commit()
+
+    _emit_task_update(task)
+    if agent:
+        _emit_agent_update(agent)
 
     return jsonify({
         'status': task.status,
@@ -507,6 +1145,7 @@ def escalate_task(task_id):
     })
 
     db.session.commit()
+    _emit_task_update(task)
     return jsonify(task.to_dict())
 
 
@@ -544,6 +1183,7 @@ def release_task(task_id):
     })
 
     db.session.commit()
+    _emit_task_update(task)
     return jsonify(task.to_dict())
 
 
@@ -571,6 +1211,7 @@ def requeue_task(task_id):
             'reason': f'Max attempts ({task.attempts}/{task.max_attempts}) reached',
         })
         db.session.commit()
+        _emit_task_update(task)
         return jsonify(task.to_dict())
 
     # Requeue: go to released, then auto-transition to pending
@@ -595,6 +1236,7 @@ def requeue_task(task_id):
     })
 
     db.session.commit()
+    _emit_task_update(task)
     return jsonify(task.to_dict())
 
 
@@ -662,6 +1304,7 @@ def agent_heartbeat():
     agent.status = data.get('status', 'busy')
 
     db.session.commit()
+    _emit_agent_update(agent)
     return jsonify({
         'agent': agent.name,
         'last_heartbeat': agent.last_heartbeat.isoformat() if agent.last_heartbeat else None,
@@ -680,6 +1323,30 @@ def list_agents():
 def get_agent(name):
     agent = Agent.query.get_or_404(name)
     return jsonify(agent.to_dict())
+
+
+@api_bp.route('/agents/<name>/reputation', methods=['GET'])
+def agent_reputation(name):
+    """Return detailed reputation stats for an agent."""
+    agent = Agent.query.get_or_404(name)
+
+    # Compute review pass rate
+    total_reviews = (agent.tasks_completed or 0) + (agent.tasks_review_rejected or 0)
+    review_pass_rate = 0.0
+    if total_reviews > 0:
+        review_pass_rate = (agent.tasks_completed or 0) / total_reviews
+
+    return jsonify({
+        'agent': agent.name,
+        'display_name': agent.display_name,
+        'tasks_completed': agent.tasks_completed or 0,
+        'tasks_failed': agent.tasks_failed or 0,
+        'tasks_review_rejected': agent.tasks_review_rejected or 0,
+        'tasks_timed_out': agent.tasks_timed_out or 0,
+        'avg_completion_time': agent.avg_completion_time or 0.0,
+        'review_pass_rate': round(review_pass_rate, 4),
+        'reputation_score': agent.reputation_score,
+    })
 
 
 @api_bp.route('/agents', methods=['POST'])
@@ -721,7 +1388,341 @@ def register_agent():
     })
 
     db.session.commit()
+    _emit_agent_update(existing)
     return jsonify(existing.to_dict()), (201 if is_new else 200)
+
+
+# ── Agent Card Endpoints ────────────────────
+
+@api_bp.route('/agents/cards', methods=['GET'])
+def list_agent_cards():
+    """Return A2A-compatible agent cards for all agents."""
+    agents = Agent.query.all()
+    cards = [_build_agent_card(a) for a in agents]
+    return jsonify({'cards': cards})
+
+
+@api_bp.route('/agents/<name>/card', methods=['GET'])
+def get_agent_card(name):
+    """Return A2A-compatible agent card for a single agent."""
+    agent = Agent.query.get_or_404(name)
+    return jsonify(_build_agent_card(agent))
+
+
+def _build_agent_card(agent):
+    """Build an A2A-compatible Agent Card from an Agent model."""
+    return {
+        'name': agent.name,
+        'display_name': agent.display_name,
+        'role': agent.role,
+        'skills': agent.skills_list,
+        'input_modes': ['text', 'data'],
+        'output_modes': ['text', 'data'],
+        'preferred_projects': agent.preferred_projects_list,
+        'max_concurrent': agent.max_concurrent,
+        'model': agent.model,
+        'status': agent.status,
+        'reputation_score': agent.reputation_score,
+    }
+
+# ── XP & Leveling Helpers (Task #9) ────────
+
+def _calculate_xp(task, review_decision=None):
+    """Calculate XP for a completed task. Returns xp_gained."""
+    complexity = task.complexity or 3
+    base_xp = 50 * complexity
+    bonus = 0
+
+    # Speed bonus
+    if task.created_at and task.completed_at:
+        created = task.created_at
+        completed = task.completed_at
+        if created.tzinfo:
+            created = created.replace(tzinfo=None)
+        if completed.tzinfo:
+            completed = completed.replace(tzinfo=None)
+        delta_sec = (completed - created).total_seconds()
+        if delta_sec >= 0:
+            if delta_sec < 60:
+                bonus += 25
+            elif delta_sec < 300:
+                bonus += 10
+
+    # Review bonus
+    if review_decision == 'approve':
+        bonus += 15
+
+    return base_xp + bonus
+
+
+def _update_streak(agent_name):
+    """Update streak for an agent after task completion. Returns new streak."""
+    from datetime import date
+    agent = db.session.get(Agent, agent_name)
+    if not agent:
+        return 0
+    today = date.today()
+    if agent.last_active_date:
+        yesterday = today - timedelta(days=1)
+        if agent.last_active_date == yesterday:
+            agent.streak = (agent.streak or 0) + 1
+        elif agent.last_active_date == today:
+            pass  # no change
+        else:
+            agent.streak = 1
+    else:
+        agent.streak = 1
+    agent.last_active_date = today
+    return agent.streak
+
+
+def _grant_xp(agent_name, task, review_decision=None):
+    """Calculate and grant XP to an agent. Returns (xp_gained, new_total, new_level)."""
+    agent = db.session.get(Agent, agent_name)
+    if not agent:
+        return 0, 0, 1
+    xp_gained = _calculate_xp(task, review_decision)
+    agent.xp = (agent.xp or 0) + xp_gained
+    agent.compute_level()
+    _update_streak(agent_name)
+    # Log XP gain event
+    _log_event(task.id, 'xp_gained', agent=agent_name, details={
+        'xp_gained': xp_gained,
+        'total_xp': agent.xp,
+        'level': agent.level,
+    })
+    return xp_gained, agent.xp, agent.level
+
+
+def _get_recent_xp_gains(agent_name, limit=10):
+    """Get the last N xp_gained event log entries for an agent."""
+    events = EventLog.query.filter_by(
+        agent=agent_name, event_type='xp_gained'
+    ).order_by(EventLog.created_at.desc()).limit(limit).all()
+    return [{
+        'xp_gained': json.loads(e.details).get('xp_gained', 0) if e.details else 0,
+        'task_id': e.task_id,
+        'earned_at': e.created_at.isoformat() if e.created_at else None,
+    } for e in events]
+
+
+# ── Badge Checking (Task #10) ──────────────
+
+def _check_badges(agent_name):
+    """Evaluate all badge criteria for an agent. Returns list of newly earned badges."""
+    from models import Agent, Achievement, AgentBadge
+    agent = db.session.get(Agent, agent_name)
+    if not agent:
+        return []
+
+    achievements = Achievement.query.all()
+    newly_earned = []
+
+    for ach in achievements:
+        # Skip if already earned
+        already = AgentBadge.query.filter_by(
+            agent_name=agent_name, badge_id=ach.id
+        ).first()
+        if already:
+            continue
+
+        criteria = json.loads(ach.criteria) if isinstance(ach.criteria, str) else ach.criteria
+        ctype = criteria.get('type')
+
+        earned = False
+        if ctype == 'tasks_completed':
+            earned = (agent.tasks_completed or 0) >= criteria.get('min', 1)
+        elif ctype == 'tasks_completed_min_failures':
+            earned = (agent.tasks_completed or 0) >= criteria.get('min', 5)
+            if earned and criteria.get('failures_max', 0) == 0:
+                earned = (agent.tasks_failed or 0) == 0
+        elif ctype == 'speed_demon':
+            # Check if any task was completed in under max_seconds
+            max_sec = criteria.get('max_seconds', 60)
+            fast_tasks = Task.query.filter(
+                Task.status == 'completed',
+                Task.claimed_by == agent_name,
+                Task.created_at.isnot(None),
+                Task.completed_at.isnot(None),
+            ).all()
+            for t in fast_tasks:
+                created = t.created_at
+                completed = t.completed_at
+                if created.tzinfo:
+                    created = created.replace(tzinfo=None)
+                if completed.tzinfo:
+                    completed = completed.replace(tzinfo=None)
+                delta = (completed - created).total_seconds()
+                if delta >= 0 and delta < max_sec:
+                    earned = True
+                    break
+        elif ctype == 'gold_standard':
+            min_reviews = criteria.get('min_reviews', 10)
+            pass_rate = criteria.get('pass_rate', 1.0)
+            total_reviews = (agent.tasks_completed or 0) + (agent.tasks_review_rejected or 0)
+            if total_reviews >= min_reviews:
+                rate = (agent.tasks_completed or 0) / total_reviews
+                earned = rate >= pass_rate
+        elif ctype == 'phoenix':
+            earned = (agent.tasks_completed or 0) >= criteria.get('min_completed', 1) and \
+                     (agent.tasks_failed or 0) >= criteria.get('min_failed', 1)
+        elif ctype == 'high_complexity':
+            min_count = criteria.get('min_count', 5)
+            min_complexity = criteria.get('min_complexity', 4)
+            count = Task.query.filter(
+                Task.status == 'completed',
+                Task.claimed_by == agent_name,
+                Task.complexity >= min_complexity,
+            ).count()
+            earned = count >= min_count
+        elif ctype == 'reviews_count':
+            min_count = criteria.get('min_count', 10)
+            count = Review.query.filter_by(reviewer=agent_name).count()
+            earned = count >= min_count
+
+        if earned:
+            badge = AgentBadge(agent_name=agent_name, badge_id=ach.id)
+            db.session.add(badge)
+            db.session.flush()
+            _log_event(None, 'badge_earned', agent=agent_name, details={
+                'badge_id': ach.id,
+                'badge_name': ach.name,
+                'badge_icon': ach.icon,
+            })
+            newly_earned.append({
+                'badge_id': ach.id,
+                'badge_name': ach.name,
+                'badge_icon': ach.icon,
+                'description': ach.description,
+                'earned_at': badge.earned_at.isoformat() if badge.earned_at else None,
+            })
+
+    if newly_earned:
+        db.session.commit()
+    return newly_earned
+
+
+# ── XP Endpoints (Task #9) ──────────────────
+
+@api_bp.route('/agents/<name>/xp', methods=['GET'])
+def agent_xp(name):
+    """Return XP, level, streak, and recent XP gains for an agent."""
+    agent = Agent.query.get_or_404(name)
+    recent = _get_recent_xp_gains(name)
+    return jsonify({
+        'agent': agent.name,
+        'display_name': agent.display_name,
+        'xp': agent.xp or 0,
+        'level': agent.level or 1,
+        'level_name': agent.level_name,
+        'streak': agent.streak or 0,
+        'recent_xp_gains': recent,
+    })
+
+
+@api_bp.route('/agents/xp/leaderboard', methods=['POST'])
+def xp_leaderboard():
+    """Return all agents sorted by XP descending."""
+    agents = Agent.query.order_by(Agent.xp.desc()).all()
+    return jsonify({
+        'leaderboard': [{
+            'name': a.name,
+            'display_name': a.display_name,
+            'xp': a.xp or 0,
+            'level': a.level or 1,
+            'level_name': a.level_name,
+            'streak': a.streak or 0,
+            'tasks_completed': a.tasks_completed or 0,
+        } for a in agents],
+    })
+
+
+# ── Achievement Badge Endpoints (Task #10) ──
+
+@api_bp.route('/achievements', methods=['GET'])
+def list_achievements():
+    """List all badge definitions."""
+    achievements = Achievement.query.all()
+    return jsonify({
+        'achievements': [a.to_dict() for a in achievements],
+    })
+
+
+@api_bp.route('/agents/<name>/badges', methods=['GET'])
+def agent_badges(name):
+    """List agent's earned badges with timestamps."""
+    agent = Agent.query.get_or_404(name)
+    badges = AgentBadge.query.filter_by(agent_name=name).order_by(
+        AgentBadge.earned_at.desc()
+    ).all()
+    return jsonify({
+        'agent': name,
+        'badges': [b.to_dict() for b in badges],
+    })
+
+
+@api_bp.route('/agents/<name>/check-badges', methods=['POST'])
+def retro_check_badges(name):
+    """Manually trigger badge check for retroactive awarding."""
+    agent = Agent.query.get_or_404(name)
+    newly_earned = _check_badges(name)
+    return jsonify({
+        'agent': name,
+        'new_badges': newly_earned,
+    })
+
+
+# ── Agent Discovery Endpoint (Task #17) ─────
+
+@api_bp.route('/agents/discover', methods=['GET'])
+def discover_agents():
+    """Discover agents by skills, role, reputation, and availability."""
+    skills_param = request.args.get('skills', '')
+    role = request.args.get('role')
+    min_reputation = request.args.get('min_reputation', type=int)
+    min_available = request.args.get('min_available', '').lower() == 'true'
+
+    required_skills = [s.strip().lower() for s in skills_param.split(',') if s.strip()]
+
+    agents = Agent.query.all()
+    results = []
+
+    for agent in agents:
+        # Role filter
+        if role and agent.role != role:
+            continue
+
+        # Reputation filter
+        if min_reputation is not None and (agent.reputation_score or 0) < min_reputation:
+            continue
+
+        # Availability filter
+        if min_available and agent.status != 'idle':
+            continue
+
+        # Skill matching: agent must have ALL listed skills
+        agent_skills = [s.strip().lower() for s in (agent.skills or '').split(',') if s.strip()]
+        if required_skills:
+            if not all(skill in agent_skills for skill in required_skills):
+                continue
+
+        skill_match_count = len([s for s in required_skills if s in agent_skills])
+        results.append({
+            'name': agent.name,
+            'display_name': agent.display_name,
+            'role': agent.role,
+            'skills': agent.skills_list,
+            'reputation_score': agent.reputation_score or 0,
+            'status': agent.status,
+            'skill_match_count': skill_match_count,
+        })
+
+    # Sort by skill match count DESC, then reputation DESC
+    results.sort(key=lambda r: (-r['skill_match_count'], -r['reputation_score']))
+    return jsonify({
+        'agents': results,
+        'total': len(results),
+    })
 
 
 # ── Stats ──────────────────────────────────
@@ -802,6 +1803,14 @@ def check_timeouts():
                         agent.status = 'idle'
 
     db.session.commit()
+    # Emit updates for all timed-out tasks
+    for task in stuck:
+        if task.status == 'timed_out':
+            _emit_task_update(task)
+            if task.claimed_by:
+                agent = db.session.get(Agent, task.claimed_by)
+                if agent:
+                    _emit_agent_update(agent)
     return jsonify({
         'checked': len(stuck),
         'timed_out': timed_out_count,
@@ -838,6 +1847,8 @@ def resolve_task(task_id):
         _log_event(task.id, 'resolved', details={
             'from_status': old_status, 'decision': 'approve', 'reason': reason,
         })
+        # Resolve any tasks blocked by this completed task
+        _resolve_dependencies(task)
     elif decision == 'reject':
         task.status = 'failed'
         task.last_error = reason
@@ -866,6 +1877,7 @@ def resolve_task(task_id):
         })
 
     db.session.commit()
+    _emit_task_update(task)
     return jsonify(task.to_dict())
 
 
@@ -927,6 +1939,20 @@ def auto_assign():
             # Reputation score / 20
             score += agent.reputation_score / 20
 
+            # Complexity-reputation matching:
+            # Low-complexity tasks (1-2): prefer lower-rep agents
+            # High-complexity tasks (4-5): prefer higher-rep agents
+            # Mid-complexity (3): neutral
+            task_complexity = task.complexity or 3
+            normalized_rep = (agent.reputation_score - 50.0) / 50.0  # -1.0 to 1.0
+            if task_complexity <= 2:
+                # Prefer low-rep agents: bonus for negative normalized_rep
+                score += (1.0 - normalized_rep) * 1.5
+            elif task_complexity >= 4:
+                # Prefer high-rep agents: bonus for positive normalized_rep
+                score += (1.0 + normalized_rep) * 1.5
+            # For complexity 3, no adjustment
+
             if score > best_score:
                 best_score = score
                 best_agent = agent
@@ -968,10 +1994,127 @@ def auto_assign():
             })
 
     db.session.commit()
+    # Emit updates for all assigned tasks
+    for task in pending_tasks:
+        if task.status == 'assigned':
+            _emit_task_update(task)
     return jsonify({
         'assigned': assigned_count,
         'skipped': skipped_count,
         'total': len(pending_tasks),
+        'results': results,
+    })
+
+
+# ── Overseer: auto-triage ──────────────────────────────
+
+@api_bp.route('/overseer/auto-triage', methods=['POST'])
+def auto_triage():
+    """Auto-triage tasks in triage status using rules:
+    - complexity <= 2 AND matching agent skills → auto-accept to pending
+    - complexity >= 4 → auto-escalate to needs_human
+    Log all triage decisions.
+    """
+    now = datetime.now(timezone.utc)
+    accepted_count = 0
+    escalated_count = 0
+    skipped_count = 0
+    results = []
+
+    triage_tasks = Task.query.filter_by(status='triage').order_by(
+        Task.priority, Task.created_at
+    ).all()
+
+    agents = Agent.query.filter(Agent.status != 'offline').all()
+
+    for task in triage_tasks:
+        task_tags = {t.strip().lower() for t in task.tags.split(',') if t.strip()}
+        complexity = task.complexity or 3
+
+        # Rule: complexity >= 4 → auto-escalate to needs_human
+        if complexity >= 4:
+            ok, err = _validate_transition(task, 'needs_human')
+            if ok:
+                task.status = 'needs_human'
+                task.updated_at = now
+                _log_event(task.id, 'auto_triage', details={
+                    'from_status': 'triage',
+                    'to_status': 'needs_human',
+                    'reason': f'Complexity {complexity} >= 4, auto-escalated',
+                })
+                escalated_count += 1
+                results.append({
+                    'task_id': task.id,
+                    'action': 'escalated',
+                    'to_status': 'needs_human',
+                    'reason': 'high_complexity',
+                })
+            else:
+                skipped_count += 1
+                results.append({
+                    'task_id': task.id,
+                    'action': 'skipped',
+                    'reason': f'Cannot transition to needs_human: {err}',
+                })
+            continue
+
+        # Rule: complexity <= 2 AND matching agent skills → auto-accept to pending
+        if complexity <= 2:
+            matching_skills = False
+            for agent in agents:
+                agent_skills = {s.strip().lower() for s in agent.skills.split(',') if s.strip()}
+                if task_tags & agent_skills:
+                    matching_skills = True
+                    break
+
+            if matching_skills:
+                ok, err = _validate_transition(task, 'pending')
+                if ok:
+                    task.status = 'pending'
+                    task.updated_at = now
+                    _log_event(task.id, 'auto_triage', details={
+                        'from_status': 'triage',
+                        'to_status': 'pending',
+                        'reason': f'Complexity {complexity} <= 2, matching agent skills found',
+                    })
+                    accepted_count += 1
+                    results.append({
+                        'task_id': task.id,
+                        'action': 'accepted',
+                        'to_status': 'pending',
+                        'reason': 'low_complexity_with_skills',
+                    })
+                else:
+                    skipped_count += 1
+                    results.append({
+                        'task_id': task.id,
+                        'action': 'skipped',
+                        'reason': f'Cannot transition to pending: {err}',
+                    })
+            else:
+                skipped_count += 1
+                results.append({
+                    'task_id': task.id,
+                    'action': 'skipped',
+                    'reason': 'low_complexity_no_matching_agent_skills',
+                })
+        else:
+            skipped_count += 1
+            results.append({
+                'task_id': task.id,
+                'action': 'skipped',
+                'reason': f'Complexity {complexity} not in auto-triage rules',
+            })
+
+    db.session.commit()
+    for task in triage_tasks:
+        if task.status != 'triage':
+            _emit_task_update(task)
+    return jsonify({
+        'accepted': accepted_count,
+        'escalated': escalated_count,
+        'skipped': skipped_count,
+        'total': len(triage_tasks),
         'results': results,
     })
 
@@ -1066,6 +2209,9 @@ def reclaim_timeouts():
             })
 
     db.session.commit()
+    # Emit updates for all reclaimed tasks
+    for task in timed_out_tasks:
+        _emit_task_update(task)
     return jsonify({
         'checked': len(timed_out_tasks),
         'released': released_count,
@@ -1129,6 +2275,111 @@ def overseer_dashboard():
         'timed_out_tasks': timed_out_count,
         'recent_events': [e.to_dict() for e in recent_events],
         'checked_at': now.isoformat(),
+    })
+
+
+# ── Telemetry ───────────────────────────────
+
+@api_bp.route('/telemetry', methods=['GET'])
+def telemetry():
+    """Return real-time telemetry data for the dashboard panels."""
+    from datetime import timedelta
+    from sqlalchemy import func, text as sa_text
+
+    now = datetime.now(timezone.utc)
+    one_hour_ago = now - timedelta(hours=1)
+
+    # 1. Throughput: task_created events in last hour, grouped by 5-min buckets
+    # SQLite: floor epoch seconds / 300 to create 5-min buckets
+    bucket_expr = func.floor(
+        func.strftime('%s', EventLog.created_at) / 300
+    ) * 300
+
+    throughput_rows = db.session.query(
+        bucket_expr.label('bucket'),
+        func.count(EventLog.id).label('count')
+    ).filter(
+        EventLog.event_type == 'task_created',
+        EventLog.created_at >= one_hour_ago,
+    ).group_by(
+        bucket_expr
+    ).order_by(
+        bucket_expr
+    ).all()
+
+    throughput = []
+    for row in throughput_rows:
+        bucket_ts = datetime.fromtimestamp(row.bucket, tz=timezone.utc)
+        throughput.append({
+            'bucket': bucket_ts.isoformat(),
+            'count': row.count,
+        })
+
+    # If no throughput data, return empty array
+    if not throughput:
+        throughput = []
+
+    # 2. Success rate: completed / (completed + failed + dead)
+    completed_count = Task.query.filter_by(status='completed').count()
+    failed_count = Task.query.filter_by(status='failed').count()
+    dead_count = Task.query.filter_by(status='dead').count()
+    total_ended = completed_count + failed_count + dead_count
+    success_rate = round((completed_count / total_ended * 100) if total_ended > 0 else 0.0, 1)
+
+    # 3. Avg completion time: from completed tasks' created_at -> completed_at delta
+    completed_tasks = Task.query.filter(
+        Task.status == 'completed',
+        Task.created_at.isnot(None),
+        Task.completed_at.isnot(None),
+    ).all()
+
+    avg_seconds = 0.0
+    if completed_tasks:
+        total_seconds = 0.0
+        count = 0
+        for t in completed_tasks:
+            created = t.created_at
+            completed = t.completed_at
+            if created and completed:
+                if created.tzinfo:
+                    created = created.replace(tzinfo=None)
+                if completed.tzinfo:
+                    completed = completed.replace(tzinfo=None)
+                delta = (completed - created).total_seconds()
+                if delta >= 0:
+                    total_seconds += delta
+                    count += 1
+        if count > 0:
+            avg_seconds = round(total_seconds / count, 1)
+
+    # 4. Agent utilization: active tasks / max_concurrent for each agent
+    agents = Agent.query.all()
+    agent_utilization = []
+    for agent in agents:
+        active_tasks = Task.query.filter(
+            Task.claimed_by == agent.name,
+            Task.status.in_(['claimed', 'in_progress'])
+        ).count()
+        max_conc = agent.max_concurrent or 1
+        ratio = round(active_tasks / max_conc, 2)
+        color = 'green' if ratio < 0.5 else ('yellow' if ratio <= 0.8 else 'red')
+        agent_utilization.append({
+            'name': agent.name,
+            'display_name': agent.display_name,
+            'active': active_tasks,
+            'max_concurrent': max_conc,
+            'ratio': ratio,
+            'color': color,
+        })
+
+    return jsonify({
+        'throughput': throughput,
+        'success_rate': success_rate,
+        'completed': completed_count,
+        'failed': failed_count,
+        'dead': dead_count,
+        'avg_completion_time_seconds': avg_seconds,
+        'agent_utilization': agent_utilization,
     })
 
 
@@ -1203,16 +2454,27 @@ def create_from_template(name):
         step_id_map[i] = task.id
         created_tasks.append(task)
 
-    # Set up dependencies if any step has depends_on
+    # Set up dependencies if any step has depends_on — wire blocked_by fields
     for i, step in enumerate(steps):
         depends_on = step.get('depends_on')
         if depends_on is not None and depends_on in step_id_map:
             parent_id = step_id_map[depends_on]
             child_id = step_id_map[i]
-            _log_event(child_id, 'dependency_set', details={
-                'depends_on_task_id': parent_id,
-                'from_template': name,
-            })
+            child_task = db.session.get(Task, child_id)
+            if child_task:
+                existing = child_task.get_blocking_task_ids()
+                if parent_id not in existing:
+                    existing.append(parent_id)
+                child_task.blocked_by = ','.join(str(x) for x in existing)
+                # Auto-transition to blocked if dependencies aren't met
+                if not child_task.are_dependencies_met() and child_task.can_transition_to('blocked'):
+                    child_task.status = 'blocked'
+                child_task.updated_at = datetime.now(timezone.utc)
+                _log_event(child_id, 'dependency_set', details={
+                    'depends_on_task_id': parent_id,
+                    'blocked_by': child_task.blocked_by,
+                    'from_template': name,
+                })
 
     db.session.commit()
     return jsonify({
@@ -1220,6 +2482,151 @@ def create_from_template(name):
         'created': len(created_tasks),
         'tasks': [t.to_dict() for t in created_tasks],
     }), 201
+
+
+# ── Handoff Endpoints ───────────────────────
+
+@api_bp.route('/tasks/<int:task_id>/handoff', methods=['POST'])
+def create_handoff(task_id):
+    """Create a handoff request for a task."""
+    task = Task.query.get_or_404(task_id)
+    data = request.get_json() or {}
+
+    try:
+        schema = HandoffRequestSchema(**data)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
+    # Auto-infer from_agent: schema > task.claimed_by > auth header
+    from_agent = schema.from_agent or task.claimed_by or task.assigned_to or _get_email()
+
+    handoff = HandoffRequest(
+        task_id=task.id,
+        from_agent=from_agent,
+        to_agent=schema.to_agent,
+        message=schema.message,
+        status='pending',
+    )
+    db.session.add(handoff)
+    db.session.flush()  # Get the handoff.id before logging
+
+    _log_event(task.id, 'handoff_requested', agent=from_agent, details={
+        'to_agent': schema.to_agent,
+        'message': schema.message,
+        'handoff_request_id': handoff.id,
+    })
+
+    db.session.commit()
+    return jsonify(handoff.to_dict()), 201
+
+
+@api_bp.route('/tasks/<int:task_id>/handoff/<int:request_id>/accept', methods=['POST'])
+def accept_handoff(task_id, request_id):
+    """Accept a handoff request — reassign the task to the requesting agent."""
+    task = Task.query.get_or_404(task_id)
+    handoff = HandoffRequest.query.get_or_404(request_id)
+
+    if handoff.task_id != task.id:
+        return jsonify({'error': 'Handoff request does not belong to this task'}), 400
+
+    if handoff.status != 'pending':
+        return jsonify({'error': f'Handoff request is already {handoff.status}'}), 409
+
+    handoff.status = 'accepted'
+
+    # Reassign the task to the new agent
+    now = datetime.now(timezone.utc)
+    task.assigned_to = handoff.to_agent
+    task.claimed_by = None
+    task.lease_expires_at = None
+    task.heartbeat_at = None
+    task.updated_at = now
+
+    # Release from current locked state so new agent can claim
+    release_states = frozenset(['claimed', 'in_progress', 'submitted', 'in_review', 'needs_revision'])
+    if task.status in release_states:
+        task.status = 'pending'
+        _log_event(task.id, 'released', agent=handoff.from_agent, details={
+            'reason': f'Handoff to {handoff.to_agent}',
+        })
+
+    # Now assign to new agent
+    if task.can_transition_to('assigned'):
+        task.status = 'assigned'
+
+    # Create agent for to_agent if needed
+    _get_agent_or_create(handoff.to_agent)
+
+    _log_event(task.id, 'handoff_accepted', agent=handoff.to_agent, details={
+        'from_agent': handoff.from_agent,
+        'to_agent': handoff.to_agent,
+        'handoff_request_id': handoff.id,
+    })
+
+    db.session.commit()
+    _emit_task_update(task)
+    return jsonify({
+        'handoff': handoff.to_dict(),
+        'task': task.to_dict(),
+    })
+
+
+@api_bp.route('/tasks/<int:task_id>/handoff/<int:request_id>/reject', methods=['POST'])
+def reject_handoff(task_id, request_id):
+    """Reject a handoff request."""
+    task = Task.query.get_or_404(task_id)
+    handoff = HandoffRequest.query.get_or_404(request_id)
+
+    if handoff.task_id != task.id:
+        return jsonify({'error': 'Handoff request does not belong to this task'}), 400
+
+    if handoff.status != 'pending':
+        return jsonify({'error': f'Handoff request is already {handoff.status}'}), 409
+
+    handoff.status = 'rejected'
+
+    data = request.get_json() or {}
+    reason = data.get('reason', '')
+
+    _log_event(task.id, 'handoff_rejected', agent=handoff.from_agent, details={
+        'from_agent': handoff.from_agent,
+        'to_agent': handoff.to_agent,
+        'reason': reason,
+        'handoff_request_id': handoff.id,
+    })
+
+    db.session.commit()
+    return jsonify(handoff.to_dict())
+
+
+# ── Handoff History Endpoints (Task #8) ─────
+
+@api_bp.route('/tasks/<int:task_id>/handoffs', methods=['GET'])
+def task_handoffs(task_id):
+    """Return handoff history for a specific task."""
+    task = Task.query.get_or_404(task_id)
+    handoffs = HandoffRequest.query.filter_by(task_id=task.id).order_by(
+        HandoffRequest.created_at.desc()
+    ).all()
+    return jsonify({
+        'task_id': task.id,
+        'handoffs': [h.to_dict() for h in handoffs],
+        'total': len(handoffs),
+    })
+
+
+@api_bp.route('/agents/<name>/handoffs', methods=['GET'])
+def agent_handoffs(name):
+    """Return handoff history for a specific agent, as either sender or receiver."""
+    agent = Agent.query.get_or_404(name)
+    handoffs = HandoffRequest.query.filter(
+        (HandoffRequest.from_agent == name) | (HandoffRequest.to_agent == name)
+    ).order_by(HandoffRequest.created_at.desc()).all()
+    return jsonify({
+        'agent': name,
+        'handoffs': [h.to_dict() for h in handoffs],
+        'total': len(handoffs),
+    })
 
 
 def _substitute_vars(text, variables):

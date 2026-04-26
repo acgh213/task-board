@@ -2,12 +2,16 @@
 instance/*.db
 instance/*.db-wal
 instance/*.db-shm
+taskboard.db
+taskboard.db-wal
+taskboard.db-shm
 
 # Backups
 backups/
 
 # Python cache
 __pycache__/
+*/__pycache__/
 *.pyc
 
 # Testing

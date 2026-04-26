@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}Edit {{ agent.display_name }} — Command Center{% endblock %}
+
+{% block breadcrumbs %}
+<nav class="breadcrumbs">
+    <a href="/">Dashboard</a>
+    <span class="breadcrumb-sep">›</span>
+    <a href="/agents">Agents</a>
+    <span class="breadcrumb-sep">›</span>
+    <a href="/agent/{{ agent.name }}">{{ agent.display_name }}</a>
+    <span class="breadcrumb-sep">›</span>
+    <span>Edit</span>
+</nav>
+{% endblock %}
+
+{% block content %}
+<div class="agent-edit-page">
+    <div class="agent-edit-header">
+        <a href="/agent/{{ agent.name }}" class="back-link">← Back to Agent</a>
+        <h1>✎ Edit Agent: {{ agent.display_name }}</h1>
+    </div>
+
+    <div class="detail-card agent-edit-card">
+        <form id="agent-edit-form" class="agent-edit-form" onsubmit="return submitEdit(event)">
+            <input type="hidden" name="name" value="{{ agent.name }}">
+
+            <div class="form-field">
+                <label for="display_name">Display Name</label>
+                <input type="text" id="display_name" name="display_name" class="cmd-create-input"
+                       value="{{ agent.display_name }}" required>
+            </div>
+
+            <div class="form-field">
+                <label for="model">Model</label>
+                <input type="text" id="model" name="model" class="cmd-create-input"
+                       value="{{ agent.model }}" placeholder="e.g. deepseek-v4-flash">
+            </div>
+
+            <div class="form-field">
+                <label for="role">Role</label>
+                <select id="role" name="role" class="cmd-create-select">
+                    <option value="worker" {% if agent.role == 'worker' %}selected{% endif %}>Worker</option>
+                    <option value="mission_control" {% if agent.role == 'mission_control' %}selected{% endif %}>Mission Control</option>
+                    <option value="overseer" {% if agent.role == 'overseer' %}selected{% endif %}>Overseer</option>
+                    <option value="reviewer" {% if agent.role == 'reviewer' %}selected{% endif %}>Reviewer</option>
+                </select>
+            </div>
+
+            <div class="form-field">
+                <label for="skills">Skills <span class="form-hint">(comma-separated)</span></label>
+                <input type="text" id="skills" name="skills" class="cmd-create-input"
+                       value="{{ agent.skills }}" placeholder="python, flask, database">
+            </div>
+
+            <div class="form-field">
+                <label for="preferred_projects">Preferred Projects <span class="form-hint">(comma-separated)</span></label>
+                <input type="text" id="preferred_projects" name="preferred_projects" class="cmd-create-input"
+                       value="{{ agent.preferred_projects }}" placeholder="hermes, task-board">
+            </div>
+
+            <div class="form-field">
+                <label for="max_concurrent">Max Concurrent Tasks <span class="form-hint">(1–10)</span></label>
+                <input type="number" id="max_concurrent" name="max_concurrent" class="cmd-create-input"
+                       value="{{ agent.max_concurrent }}" min="1" max="10" required>
+            </div>
+
+            <div class="form-actions">
+                <a href="/agent/{{ agent.name }}" class="cmd-btn cmd-btn-secondary">Cancel</a>
+                <button type="submit" class="cmd-btn cmd-btn-primary">⟳ Save Changes</button>
+            </div>
+        </form>
+    </div>
+
+    <div id="edit-error" class="edit-error" style="display:none;"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function submitEdit(event) {
+    event.preventDefault();
+    const form = document.getElementById('agent-edit-form');
+    const errorDiv = document.getElementById('edit-error');
+    errorDiv.style.display = 'none';
+
+    const formData = new FormData(form);
+    const data = {};
+    for (const [key, value] of formData.entries()) {
+        if (key === 'max_concurrent') {
+            data[key] = parseInt(value, 10);
+        } else {
+            data[key] = value;
+        }
+    }
+
+    try {
+        const resp = await fetch('/api/agents', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data),
+        });
+        if (!resp.ok) {
+            const err = await resp.json();
+            errorDiv.textContent = err.error || 'Failed to save agent';
+            errorDiv.style.display = 'block';
+            return false;
+        }
+        window.location.href = '/agent/{{ agent.name }}';
+    } catch (e) {
+        errorDiv.textContent = 'Network error: ' + e.message;
+        errorDiv.style.display = 'block';
+    }
+    return false;
+}
+</script>
+{% endblock %}

@@ -33,7 +33,7 @@ def _full_complete(client, task_id, agent='coder', reviewer='editor', result='Do
     client.post(f'/api/tasks/{task_id}/assign', json={'agent': agent})
     client.post(f'/api/tasks/{task_id}/claim', json={'agent': agent})
     client.post(f'/api/tasks/{task_id}/start', json={'agent': agent})
-    client.post(f'/api/tasks/{task_id}/submit', json={'agent': agent, 'result': result})
+    client.post(f'/api/tasks/{task_id}/submit?skip_wait=true', json={'agent': agent, 'result': result})
     return client.post(f'/api/tasks/{task_id}/review', json={'reviewer': reviewer, 'decision': 'approve'})
 
 
@@ -42,7 +42,7 @@ def _full_fail(client, task_id, agent='coder', reviewer='editor', result='Result
     client.post(f'/api/tasks/{task_id}/assign', json={'agent': agent})
     client.post(f'/api/tasks/{task_id}/claim', json={'agent': agent})
     client.post(f'/api/tasks/{task_id}/start', json={'agent': agent})
-    client.post(f'/api/tasks/{task_id}/submit', json={'agent': agent, 'result': result})
+    client.post(f'/api/tasks/{task_id}/submit?skip_wait=true', json={'agent': agent, 'result': result})
     return client.post(f'/api/tasks/{task_id}/review', json={'reviewer': reviewer, 'decision': 'reject', 'feedback': feedback})
 
 

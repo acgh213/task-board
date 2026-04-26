@@ -63,7 +63,7 @@ def _complete_task(client, task_id, agent='coder', reviewer='editor', result='Do
     client.post(f'/api/tasks/{task_id}/assign', json={'agent': agent})
     client.post(f'/api/tasks/{task_id}/claim', json={'agent': agent})
     client.post(f'/api/tasks/{task_id}/start', json={'agent': agent})
-    client.post(f'/api/tasks/{task_id}/submit', json={'agent': agent, 'result': result})
+    client.post(f'/api/tasks/{task_id}/submit?skip_wait=true', json={'agent': agent, 'result': result})
     return client.post(f'/api/tasks/{task_id}/review',
                        json={'reviewer': reviewer, 'decision': 'approve'})
 
@@ -372,7 +372,7 @@ class TestPollDaemon:
         client.post(f'/api/tasks/{t["id"]}/assign', json={'agent': 'coder'})
         client.post(f'/api/tasks/{t["id"]}/claim', json={'agent': 'coder'})
         client.post(f'/api/tasks/{t["id"]}/start', json={'agent': 'coder'})
-        client.post(f'/api/tasks/{t["id"]}/submit', json={
+        client.post(f'/api/tasks/{t["id"]}/submit?skip_wait=true', json={
             'agent': 'coder',
             'result': 'Successfully completed by daemon',
         })

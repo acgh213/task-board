@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% block title %}Stats — Command Center{% endblock %}
+
+{% block breadcrumbs %}
+<nav class="breadcrumbs">
+    <a href="/">Dashboard</a>
+    <span class="breadcrumb-sep">›</span>
+    <span>Statistics</span>
+</nav>
+{% endblock %}
+
+{% block content %}
+<div class="dashboard-header">
+    <h1>Operations Statistics</h1>
+</div>
+
+<!-- System Health Cards -->
+<div class="health-grid">
+    <div class="health-card">
+        <div class="health-card-icon">📋</div>
+        <div class="health-card-content">
+            <span class="health-card-value">{{ total_tasks }}</span>
+            <span class="health-card-label">Total Tasks</span>
+        </div>
+    </div>
+    <div class="health-card">
+        <div class="health-card-icon">⚡</div>
+        <div class="health-card-content">
+            <span class="health-card-value">{{ active_count }}</span>
+            <span class="health-card-label">Active Tasks</span>
+        </div>
+    </div>
+    <div class="health-card">
+        <div class="health-card-icon">🤖</div>
+        <div class="health-card-content">
+            <span class="health-card-value">{{ total_agents }}</span>
+            <span class="health-card-label">Total Agents</span>
+        </div>
+    </div>
+    <div class="health-card">
+        <div class="health-card-icon">🟢</div>
+        <div class="health-card-content">
+            <span class="health-card-value">{{ online_agents }}</span>
+            <span class="health-card-label">Online</span>
+        </div>
+    </div>
+    <div class="health-card">
+        <div class="health-card-icon">🏆</div>
+        <div class="health-card-content">
+            <span class="health-card-value">{{ highest_level }}</span>
+            <span class="health-card-label">Highest Level</span>
+        </div>
+    </div>
+    <div class="health-card">
+        <div class="health-card-icon">💎</div>
+        <div class="health-card-content">
+            <span class="health-card-value">{{ total_xp }}</span>
+            <span class="health-card-label">Total XP</span>
+        </div>
+    </div>
+</div>
+
+<!-- Tasks by Status -->
+<div class="detail-card">
+    <h3>Tasks by Status</h3>
+    {% if stats %}
+    <div class="status-bar-chart">
+        {% for status, count in stats.items()|sort(attribute='0') %}
+        <div class="status-bar-row">
+            <span class="status-bar-label">
+                <span class="status-badge {{ status }}">{{ status|replace('_', ' ') }}</span>
+            </span>
+            <div class="status-bar-track">
+                <div class="status-bar-fill status-{{ status }}" style="width: {{ (count / total_tasks * 100)|round(1) if total_tasks > 0 else 0 }}%"></div>
+            </div>
+            <span class="status-bar-count">{{ count }}</span>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state">No tasks found</div>
+    {% endif %}
+</div>
+
+<div class="stats-two-col">
+    <!-- Agent Performance Table -->
+    <div class="detail-card">
+        <h3>Agent Performance</h3>
+        {% if agent_perf %}
+        <div class="perf-table-wrapper">
+            <table class="perf-table">
+                <thead>
+                    <tr>
+                        <th>Agent</th>
+                        <th>Status</th>
+                        <th>✓</th>
+                        <th>✗</th>
+                        <th>Rep</th>
+                        <th>XP</th>
+                        <th>Lv</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for a in agent_perf %}
+                    <tr onclick="window.location='/agent/{{ a.name }}'">
+                        <td class="perf-agent-name">{{ a.display_name }}</td>
+                        <td><span class="status-badge {{ a.status }}">{{ a.status }}</span></td>
+                        <td class="perf-good">{{ a.completed }}</td>
+                        <td class="perf-bad">{{ a.failed }}</td>
+                        <td class="perf-rep">{{ a.rep|round(1) }}</td>
+                        <td class="perf-xp">{{ a.xp }}</td>
+                        <td>{{ a.level }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="empty-state">No agents registered</div>
+        {% endif %}
+    </div>
+
+    <!-- Recent Activity Timeline -->
+    <div class="detail-card">
+        <h3>Recent Activity</h3>
+        {% if events %}
+        <div class="event-list">
+            {% for event in events %}
+            <div class="event-item">
+                <span class="event-type-badge event-{{ event.event_type }}">{{ event.event_type }}</span>
+                <span class="event-agent">{{ event.agent or '—' }}</span>
+                {% if event.task_id %}
+                <span class="event-task-ref">#{{ event.task_id }}</span>
+                {% endif %}
+                <span class="event-time">{{ event.created_at.strftime('%Y-%m-%d %H:%M:%S') if event.created_at else '' }}</span>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="empty-state">No recent events</div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

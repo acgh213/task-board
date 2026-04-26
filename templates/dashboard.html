@@ -1,10 +1,10 @@
 {% extends "base.html" %}
-{% block title %}Dashboard — Task Board{% endblock %}
+{% block title %}Dashboard — Command Center{% endblock %}
 
 {% block content %}
 <div class="dashboard-header">
-    <h1>Task Board</h1>
-    <div class="stats-bar">
+    <h1>Task Operations Board</h1>
+    <div class="stats-bar" id="stats-bar">
         <div class="stat-card pending">
             <span class="stat-count">{{ stats.get('pending', 0) }}</span>
             <span class="stat-label">Pending</span>
@@ -97,8 +97,22 @@
             {% endfor %}
         </select>
     </div>
-    <button class="filter-reset" onclick="resetFilters()">Reset</button>
-    <span class="auto-refresh-indicator" id="refresh-indicator">Auto-refreshing every 30s</span>
+    <div class="filter-group">
+        <label for="filter-priority">Priority</label>
+        <select id="filter-priority" class="filter-select" onchange="applyFilters()">
+            <option value="">All Priorities</option>
+            <option value="1" {% if request.args.get('priority') == '1' %}selected{% endif %}>P1 — Critical</option>
+            <option value="2" {% if request.args.get('priority') == '2' %}selected{% endif %}>P2 — High</option>
+            <option value="3" {% if request.args.get('priority') == '3' %}selected{% endif %}>P3 — Medium</option>
+            <option value="4" {% if request.args.get('priority') == '4' %}selected{% endif %}>P4 — Low</option>
+            <option value="5" {% if request.args.get('priority') == '5' %}selected{% endif %}>P5 — Backlog</option>
+        </select>
+    </div>
+    <button class="filter-reset" onclick="resetFilters()">⟳ Reset</button>
+    <span class="auto-refresh-indicator" id="refresh-indicator">
+        <span id="ws-status" class="ws-status disconnected">⚫</span>
+        Live — Connected
+    </span>
 </div>
 
 <!-- Kanban Board — 5 Grouped Columns for 15 Statuses -->
@@ -106,9 +120,9 @@
 
     <!-- Column 1: Pipeline Start -->
     <div class="column">
-        <h2 class="column-header pending">📋 Pipeline</h2>
+        <h2 class="column-header pending">◈ Pipeline</h2>
         {% for task in tasks if task.status == 'pending' %}
-        <a href="/task/{{ task.id }}" class="task-card priority-{{ task.priority }}">
+        <a href="/task/{{ task.id }}" class="task-card priority-{{ task.priority }}" data-task-id="{{ task.id }}">
             <div class="task-title">{{ task.title }}</div>
             <div class="task-meta">
                 <span class="priority priority-{{ task.priority }}">P{{ task.priority }}</span>
@@ -118,20 +132,20 @@
         </a>
         {% endfor %}
         {% for task in tasks if task.status == 'assigned' %}
-        <a href="/task/{{ task.id }}" class="task-card priority-{{ task.priority }}">
+        <a href="/task/{{ task.id }}" class="task-card priority-{{ task.priority }}" data-task-id="{{ task.id }}">
             <div class="task-title">{{ task.title }}</div>
             <div class="task-meta">
-                <span class="agent">{{ task.assigned_to }}</span>
+                <span class="agent">{{ agent_labels.get(task.assigned_to, task.assigned_to) }}</span>
                 <span class="priority priority-{{ task.priority }}">P{{ task.priority }}</span>
             </div>
             <div class="task-task-status">{{ task.status }}</div>
         </a>
         {% endfor %}
         {% for task in tasks if task.status == 'claimed' %}
-        <a href="/task/{{ task.id }}" class="task-card priority-{{ task.priority }}">
+        <a href="/task/{{ task.id }}" class="task-card priority-{{ task.priority }}" data-task-id="{{ task.id }}">
             <div class="task-title">{{ task.title }}</div>
             <div class="task-meta">
-                <span class="agent">{{ task.claimed_by }}</span>
+                <span class="agent">{{ agent_labels.get(task.claimed_by, task.claimed_by) }}</span>
                 <span class="priority priority-{{ task.priority }}">P{{ task.priority }}</span>
             </div>
             <div class="task-task-status">{{ task.status }}</div>
@@ -144,42 +158,42 @@
 
     <!-- Column 2: Active Work -->
     <div class="column">
-        <h2 class="column-header in_progress">🔧 Active</h2>
+        <h2 class="column-header in_progress">◈ Active</h2>
         {% for task in tasks if task.status == 'in_progress' %}
-        <a href="/task/{{ task.id }}" class="task-card priority-{{ task.priority }}">
+        <a href="/task/{{ task.id }}" class="task-card priority-{{ task.priority }}" data-task-id="{{ task.id }}">
             <div class="task-title">{{ task.title }}</div>
             <div class="task-meta">
-                <span class="agent">{{ task.claimed_by }}</span>
+                <span class="agent">{{ agent_labels.get(task.claimed_by, task.claimed_by) }}</span>
                 <span class="priority priority-{{ task.priority }}">P{{ task.priority }}</span>
             </div>
             <div class="task-task-status">{{ task.status }}</div>
         </a>
         {% endfor %}
         {% for task in tasks if task.status == 'submitted' %}
-        <a href="/task/{{ task.id }}" class="task-card priority-{{ task.priority }}">
+        <a href="/task/{{ task.id }}" class="task-card priority-{{ task.priority }}" data-task-id="{{ task.id }}">
             <div class="task-title">{{ task.title }}</div>
             <div class="task-meta">
-                <span class="agent">{{ task.claimed_by }}</span>
+                <span class="agent">{{ agent_labels.get(task.claimed_by, task.claimed_by) }}</span>
                 <span class="priority priority-{{ task.priority }}">P{{ task.priority }}</span>
             </div>
             <div class="task-task-status">submitted</div>
         </a>
         {% endfor %}
         {% for task in tasks if task.status == 'in_review' %}
-        <a href="/task/{{ task.id }}" class="task-card priority-{{ task.priority }}">
+        <a href="/task/{{ task.id }}" class="task-card priority-{{ task.priority }}" data-task-id="{{ task.id }}">
             <div class="task-title">{{ task.title }}</div>
             <div class="task-meta">
-                <span class="agent">{{ task.claimed_by }}</span>
+                <span class="agent">{{ agent_labels.get(task.claimed_by, task.claimed_by) }}</span>
                 <span class="priority priority-{{ task.priority }}">P{{ task.priority }}</span>
             </div>
             <div class="task-task-status">in review</div>
         </a>
         {% endfor %}
         {% for task in tasks if task.status == 'needs_revision' %}
-        <a href="/task/{{ task.id }}" class="task-card priority-{{ task.priority }}">
+        <a href="/task/{{ task.id }}" class="task-card priority-{{ task.priority }}" data-task-id="{{ task.id }}">
             <div class="task-title">{{ task.title }}</div>
             <div class="task-meta">
-                <span class="agent">{{ task.claimed_by }}</span>
+                <span class="agent">{{ agent_labels.get(task.claimed_by, task.claimed_by) }}</span>
                 <span class="priority priority-{{ task.priority }}">P{{ task.priority }}</span>
             </div>
             <div class="task-task-status">needs revision</div>
@@ -192,56 +206,66 @@
 
     <!-- Column 3: Completed & Released -->
     <div class="column">
-        <h2 class="column-header completed">✅ Done</h2>
-        {% for task in tasks if task.status == 'completed' %}
-        <a href="/task/{{ task.id }}" class="task-card priority-{{ task.priority }}">
-            <div class="task-title">{{ task.title }}</div>
-            <div class="task-meta">
-                <span class="agent">{{ task.claimed_by or task.agent }}</span>
-            </div>
-            <div class="task-time">{{ task.completed_at.strftime('%Y-%m-%d %H:%M') if task.completed_at else '' }}</div>
-        </a>
-        {% endfor %}
-        {% for task in tasks if task.status == 'released' %}
-        <a href="/task/{{ task.id }}" class="task-card priority-{{ task.priority }}">
-            <div class="task-title">{{ task.title }}</div>
-            <div class="task-meta">
-                <span class="project">{{ task.project }}</span>
-                <span class="priority priority-{{ task.priority }}">P{{ task.priority }}</span>
-            </div>
-            <div class="task-task-status">released</div>
-        </a>
-        {% endfor %}
+        <h2 class="column-header completed">◈ Done</h2>
         {% set ns3 = namespace(has_tasks=false) %}
         {% for t in tasks %}{% if t.status in ('completed','released') %}{% set ns3.has_tasks = true %}{% endif %}{% endfor %}
-        {% if not ns3.has_tasks %}<div class="empty-state">No completed tasks</div>{% endif %}
+        {% if ns3.has_tasks %}
+        {% set done_count = (tasks | selectattr('status', 'equalto', 'completed') | list | length) + (tasks | selectattr('status', 'equalto', 'released') | list | length) %}
+        <details class="done-panel" id="done-panel">
+            <summary class="done-panel-summary">
+                <span class="done-panel-label">Completed tasks ({{ done_count }})</span>
+                <span class="done-panel-hint">Expand archive</span>
+            </summary>
+            <div class="done-task-list" id="done-task-list">
+                {% for task in tasks if task.status == 'completed' %}
+                <a href="/task/{{ task.id }}" class="task-card priority-{{ task.priority }}" data-task-id="{{ task.id }}">
+                    <div class="task-title">{{ task.title }}</div>
+                    <div class="task-meta">
+                        <span class="agent">{{ agent_labels.get(task.claimed_by or task.assigned_to, task.claimed_by or task.assigned_to) }}</span>
+                    </div>
+                    <div class="task-time">{{ task.completed_at.strftime('%Y-%m-%d %H:%M') if task.completed_at else '' }}</div>
+                </a>
+                {% endfor %}
+                {% for task in tasks if task.status == 'released' %}
+                <a href="/task/{{ task.id }}" class="task-card priority-{{ task.priority }}" data-task-id="{{ task.id }}">
+                    <div class="task-title">{{ task.title }}</div>
+                    <div class="task-meta">
+                        <span class="project">{{ task.project }}</span>
+                        <span class="priority priority-{{ task.priority }}">P{{ task.priority }}</span>
+                    </div>
+                    <div class="task-task-status">released</div>
+                </a>
+                {% endfor %}
+            </div>
+        </details>
+        {% else %}<div class="empty-state done-empty-state">No completed tasks</div>{% endif %}
     </div>
 
     <!-- Column 4: Failures -->
     <div class="column">
-        <h2 class="column-header failed">❌ Failures</h2>
+        <h2 class="column-header failed">◈ Failures</h2>
         {% for task in tasks if task.status == 'failed' %}
-        <a href="/task/{{ task.id }}" class="task-card priority-{{ task.priority }}">
+        <a href="/task/{{ task.id }}" class="task-card priority-{{ task.priority }}" data-task-id="{{ task.id }}">
             <div class="task-title">{{ task.title }}</div>
             <div class="task-meta">
-                <span class="agent">{{ task.claimed_by or task.agent }}</span>
+                <span class="agent">{{ agent_labels.get(task.claimed_by or task.assigned_to, task.claimed_by or task.assigned_to) }}</span>
                 <span>#{{ task.attempts }}/{{ task.max_attempts }}</span>
             </div>
             <div class="task-task-status">failed</div>
         </a>
         {% endfor %}
         {% for task in tasks if task.status == 'timed_out' %}
-        <a href="/task/{{ task.id }}" class="task-card priority-{{ task.priority }}">
+        <a href="/task/{{ task.id }}" class="task-card priority-{{ task.priority }}" data-task-id="{{ task.id }}">
             <div class="task-title">{{ task.title }}</div>
             <div class="task-meta">
-                <span class="agent">{{ task.claimed_by or task.agent }}</span>
+                <span class="agent">{{ agent_labels.get(task.claimed_by or task.assigned_to, task.claimed_by or task.assigned_to) }}</span>
                 <span>#{{ task.attempts }}/{{ task.max_attempts }}</span>
             </div>
             <div class="task-task-status">timed out</div>
         </a>
         {% endfor %}
         {% for task in tasks if task.status == 'dead' %}
-        <a href="/task/{{ task.id }}" class="task-card priority-{{ task.priority }}">
+        <a href="/task/{{ task.id }}" class="task-card priority-{{ task.priority }}" data-task-id="{{ task.id }}">
             <div class="task-title">{{ task.title }}</div>
             <div class="task-meta">
                 <span class="project">{{ task.project }}</span>
@@ -257,9 +281,9 @@
 
     <!-- Column 5: Blocked & Escalated -->
     <div class="column">
-        <h2 class="column-header needs_human">🚨 Blocked / Escalated</h2>
+        <h2 class="column-header needs_human">◈ Blocked / Escalated</h2>
         {% for task in tasks if task.status == 'blocked' %}
-        <a href="/task/{{ task.id }}" class="task-card priority-{{ task.priority }}">
+        <a href="/task/{{ task.id }}" class="task-card priority-{{ task.priority }}" data-task-id="{{ task.id }}">
             <div class="task-title">{{ task.title }}</div>
             <div class="task-meta">
                 <span class="project">{{ task.project }}</span>
@@ -269,7 +293,7 @@
         </a>
         {% endfor %}
         {% for task in tasks if task.status == 'needs_human' %}
-        <a href="/task/{{ task.id }}" class="task-card priority-{{ task.priority }}">
+        <a href="/task/{{ task.id }}" class="task-card priority-{{ task.priority }}" data-task-id="{{ task.id }}">
             <div class="task-title">{{ task.title }}</div>
             <div class="task-meta">
                 <span class="project">{{ task.project }}</span>
@@ -279,7 +303,7 @@
         </a>
         {% endfor %}
         {% for task in tasks if task.status == 'needs_vesper' %}
-        <a href="/task/{{ task.id }}" class="task-card priority-{{ task.priority }}">
+        <a href="/task/{{ task.id }}" class="task-card priority-{{ task.priority }}" data-task-id="{{ task.id }}">
             <div class="task-title">{{ task.title }}</div>
             <div class="task-meta">
                 <span class="project">{{ task.project }}</span>
@@ -295,10 +319,89 @@
 
 </div>
 
-<!-- Agents Section -->
+<!-- Telemetry Section — Real-Time Metrics -->
+<div class="telemetry-section">
+    <h2>◈ Telemetry</h2>
+    <div class="telemetry-grid">
+
+        <!-- Card 1: Tasks/min Throughput (Bar Chart) -->
+        <div class="telemetry-card">
+            <div class="telemetry-card-header">Tasks/min Throughput</div>
+            <div class="throughput-chart" id="throughput-chart">
+                <div class="throughput-empty">No data</div>
+            </div>
+        </div>
+
+        <!-- Card 2: Success Rate (SVG Circular Gauge) -->
+        <div class="telemetry-card">
+            <div class="telemetry-card-header">Success Rate</div>
+            <div class="gauge-container" id="gauge-container">
+                <svg class="gauge-svg" viewBox="0 0 120 120" id="gauge-svg">
+                    <!-- Background ring -->
+                    <circle cx="60" cy="60" r="50" fill="none" stroke="#1a3355" stroke-width="8"/>
+                    <!-- Fill ring (animated via stroke-dasharray) -->
+                    <circle class="gauge-fill" cx="60" cy="60" r="50" fill="none"
+                        stroke="var(--neon-cyan)" stroke-width="8" stroke-linecap="round"
+                        stroke-dasharray="0 314.16" stroke-dashoffset="0"
+                        transform="rotate(-90 60 60)"/>
+                    <!-- Center text -->
+                    <text class="gauge-text" x="60" y="55" text-anchor="middle"
+                        font-family="'JetBrains Mono', monospace" font-size="18"
+                        fill="var(--text-primary)" font-weight="700">0%</text>
+                    <text class="gauge-label" x="60" y="75" text-anchor="middle"
+                        font-family="'JetBrains Mono', monospace" font-size="7"
+                        fill="var(--text-muted)">SUCCESS</text>
+                </svg>
+            </div>
+        </div>
+
+        <!-- Card 3: Avg Completion Time -->
+        <div class="telemetry-card">
+            <div class="telemetry-card-header">Avg Completion Time</div>
+            <div class="avg-time-container">
+                <span class="avg-time-value" id="avg-time-value">0</span>
+                <span class="avg-time-unit" id="avg-time-unit">s</span>
+            </div>
+            <div class="avg-time-note">from task creation to completion</div>
+        </div>
+
+        <!-- Card 4: Agent Utilization Heatmap -->
+        <div class="telemetry-card">
+            <div class="telemetry-card-header">Agent Utilization</div>
+            <div class="agent-util-list" id="agent-util-list">
+                <div class="util-empty">No agents</div>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<!-- Leaderboard Section — XP Rankings -->
+<div class="leaderboard-section">
+    <h2>◈ Leaderboard</h2>
+    <div class="leaderboard-table-wrapper">
+        <table class="leaderboard-table" id="leaderboard-table">
+            <thead>
+                <tr>
+                    <th>Rank</th>
+                    <th>Agent</th>
+                    <th>Level</th>
+                    <th>XP</th>
+                    <th>Streak</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody id="leaderboard-body">
+                <tr><td colspan="6" class="leaderboard-empty">Loading...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Agents Section — Crew Stations -->
 <div class="agents-section">
-    <h2>🤖 Agents</h2>
-    <div class="agent-list">
+    <h2>◈ Crew Stations</h2>
+    <div class="agent-list" id="agent-list">
         {% for agent in agents %}
         <a href="/agent/{{ agent.name }}" class="agent-card-link">
             <div class="agent-card status-{{ agent.status }}">
@@ -310,12 +413,18 @@
                     {% endfor %}
                 </div>
                 <div class="agent-stats">
-                    <span>✅ {{ agent.tasks_completed }}</span>
-                    <span>❌ {{ agent.tasks_failed }}</span>
-                    <span>⭐ {{ agent.reputation_score|round(1) }}</span>
-                    <span>📊 {{ agent_loads.get(agent.name, 0) }}/{{ agent.max_concurrent }}</span>
+                    <span>✓ {{ agent.tasks_completed }}</span>
+                    <span>✗ {{ agent.tasks_failed }}</span>
+                    <span>★ {{ agent.reputation_score|round(1) }}</span>
+                    <span>⊞ {{ agent_loads.get(agent.name, 0) }}/{{ agent.max_concurrent }}</span>
                     <span class="role-badge">{{ agent.role }}</span>
                     <span class="status-badge {{ agent.status }}">{{ agent.status }}</span>
+                </div>
+                <div class="agent-heartbeat">
+                    <span class="heartbeat-label">⏱ Last seen:</span>
+                    <span class="heartbeat-value {{ 'offline' if agent_heartbeat_ages.get(agent.name, 'Never') != 'Never' and agent_heartbeat_ages.get(agent.name, '')|int(default=0) > 300 else '' }}">
+                        {{ agent_heartbeat_ages.get(agent.name, 'Never') }}
+                    </span>
                 </div>
             </div>
         </a>
@@ -323,9 +432,9 @@
     </div>
 </div>
 
-<!-- Recent Events Section -->
+<!-- Recent Events Section — Ship Log -->
 <div class="events-section">
-    <h2>📜 Recent Events</h2>
+    <h2>◈ Ship Log</h2>
     <div class="event-list" id="event-list">
         {% for event in events %}
         <div class="event-item">
@@ -341,9 +450,450 @@
 </div>
 {% endblock %}
 
+{# ── Command Palette (Cmd+K) ─────────────────────────────── #}
+<div id="cmd-palette-overlay" class="cmd-overlay hidden">
+    <div class="cmd-modal" id="cmd-modal">
+        <div class="cmd-search-wrapper">
+            <input type="text" id="cmd-input" class="cmd-input" placeholder="Type a command or search..." autofocus spellcheck="false" autocomplete="off">
+            <span class="cmd-hint">↑↓ navigate &middot; ↵ select &middot; esc close</span>
+        </div>
+        <div class="cmd-results" id="cmd-results"></div>
+    </div>
+</div>
+
 {% block scripts %}
+<!-- SocketIO client library -->
+<script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
 <script>
-// Auto-refresh every 30 seconds
+// ── Socket.IO real-time connection ──────────────────────────
+const socket = io(window.location.origin, {
+    transports: ['websocket', 'polling'],
+    reconnection: true,
+    reconnectionDelay: 1000,
+    reconnectionAttempts: Infinity,
+});
+
+const wsStatus = document.getElementById('ws-status');
+const refreshIndicator = document.getElementById('refresh-indicator');
+
+socket.on('connect', () => {
+    wsStatus.className = 'ws-status connected';
+    wsStatus.textContent = '🟢';
+    if (refreshIndicator) refreshIndicator.innerHTML = '<span class="ws-status connected">🟢</span> Live — Connected (WebSocket)';
+});
+
+socket.on('disconnect', () => {
+    wsStatus.className = 'ws-status disconnected';
+    wsStatus.textContent = '🔴';
+    if (refreshIndicator) refreshIndicator.innerHTML = '<span class="ws-status disconnected">🔴</span> Disconnected — falling back to polling';
+});
+
+socket.on('connect_error', () => {
+    wsStatus.className = 'ws-status disconnected';
+    wsStatus.textContent = '🔴';
+    if (refreshIndicator) refreshIndicator.innerHTML = '<span class="ws-status disconnected">🔴</span> Connection error — falling back to auto-refresh';
+});
+
+// Helper: create a task card HTML from data
+function createTaskCard(task) {
+    const status = task.status;
+    const priority = task.priority;
+    const created = task.created_at ? new Date(task.created_at + 'Z').toLocaleString() : '';
+    const completed = task.completed_at ? new Date(task.completed_at + 'Z').toLocaleString() : '';
+
+    let metaHtml = '';
+    let timeHtml = '';
+    let extraClass = '';
+
+    if (['pending'].includes(status)) {
+        metaHtml = `<span class="priority priority-${priority}">P${priority}</span><span class="project">${task.project}</span>`;
+        timeHtml = `<div class="task-time">${created}</div>`;
+    } else if (['assigned'].includes(status)) {
+        metaHtml = `<span class="agent">${task.assigned_to_display || task.assigned_to || ''}</span><span class="priority priority-${priority}">P${priority}</span>`;
+        extraClass = `<div class="task-task-status">${status}</div>`;
+    } else if (['claimed'].includes(status)) {
+        metaHtml = `<span class="agent">${task.claimed_by_display || task.claimed_by || ''}</span><span class="priority priority-${priority}">P${priority}</span>`;
+        extraClass = `<div class="task-task-status">${status}</div>`;
+    } else if (['in_progress', 'submitted', 'in_review'].includes(status)) {
+        metaHtml = `<span class="agent">${task.claimed_by_display || task.claimed_by || ''}</span><span class="priority priority-${priority}">P${priority}</span>`;
+        const label = status === 'in_review' ? 'in review' : status.replace('_', ' ');
+        extraClass = `<div class="task-task-status">${label}</div>`;
+    } else if (['needs_revision'].includes(status)) {
+        metaHtml = `<span class="agent">${task.claimed_by_display || task.claimed_by || ''}</span><span class="priority priority-${priority}">P${priority}</span>`;
+        extraClass = `<div class="task-task-status">needs revision</div>`;
+    } else if (['completed'].includes(status)) {
+        metaHtml = `<span class="agent">${task.claimed_by_display || task.claimed_by || task.assigned_to_display || task.assigned_to || ''}</span>`;
+        timeHtml = `<div class="task-time">${completed}</div>`;
+    } else if (['released'].includes(status)) {
+        metaHtml = `<span class="project">${task.project}</span><span class="priority priority-${priority}">P${priority}</span>`;
+        extraClass = `<div class="task-task-status">released</div>`;
+    } else if (['failed', 'timed_out'].includes(status)) {
+        metaHtml = `<span class="agent">${task.claimed_by_display || task.claimed_by || task.assigned_to_display || task.assigned_to || ''}</span><span>#${task.attempts}/${task.max_attempts}</span>`;
+        extraClass = `<div class="task-task-status">${status.replace('_', ' ')}</div>`;
+    } else if (['dead'].includes(status)) {
+        metaHtml = `<span class="project">${task.project}</span><span>#${task.attempts}/${task.max_attempts}</span>`;
+        extraClass = `<div class="task-task-status">dead</div>`;
+    } else if (['blocked', 'needs_human', 'needs_vesper'].includes(status)) {
+        metaHtml = `<span class="project">${task.project}</span><span class="priority priority-${priority}">P${priority}</span>`;
+        extraClass = `<div class="task-task-status">${status.replace('_', ' ')}</div>`;
+    }
+
+    return `<a href="/task/${task.id}" class="task-card priority-${priority}" data-task-id="${task.id}">
+        <div class="task-title">${task.title}</div>
+        <div class="task-meta">${metaHtml}</div>
+        ${timeHtml}${extraClass}
+    </a>`;
+}
+
+function refreshDonePanelMeta() {
+    const donePanel = document.getElementById('done-panel');
+    const doneList = document.getElementById('done-task-list');
+    const doneColumn = document.querySelector('#kanban-board .column:nth-child(3)');
+    if (!doneColumn) return;
+
+    const doneCount = doneList ? doneList.querySelectorAll('.task-card').length : 0;
+    let emptyState = doneColumn.querySelector('.done-empty-state');
+    const summaryLabel = doneColumn.querySelector('.done-panel-label');
+
+    if (doneCount === 0) {
+        if (donePanel) donePanel.remove();
+        if (!emptyState) {
+            emptyState = document.createElement('div');
+            emptyState.className = 'empty-state done-empty-state';
+            emptyState.textContent = 'No completed tasks';
+            doneColumn.appendChild(emptyState);
+        }
+        return;
+    }
+
+    if (emptyState) emptyState.remove();
+    if (summaryLabel) {
+        summaryLabel.textContent = `Completed tasks (${doneCount})`;
+    }
+}
+
+// ── SocketIO event handlers ────────────────────────────────
+
+socket.on('task_update', (task) => {
+    // Get current filter values
+    const statusFilter = document.getElementById('filter-status').value;
+    const agentFilter = document.getElementById('filter-agent').value;
+    const projectFilter = document.getElementById('filter-project').value;
+
+    // Check if this task matches current filters
+    if (statusFilter && task.status !== statusFilter) {
+        removeTaskCard(task.id);
+        return;
+    }
+    if (agentFilter && task.assigned_to !== agentFilter && task.claimed_by !== agentFilter) {
+        removeTaskCard(task.id);
+        return;
+    }
+    if (projectFilter && task.project !== projectFilter) {
+        removeTaskCard(task.id);
+        return;
+    }
+
+    // Find the target column for this task's status
+    let columnSelectors = {
+        'pending': 0, 'assigned': 0, 'claimed': 0,
+        'in_progress': 1, 'submitted': 1, 'in_review': 1, 'needs_revision': 1,
+        'completed': 2, 'released': 2,
+        'failed': 3, 'timed_out': 3, 'dead': 3,
+        'blocked': 4, 'needs_human': 4, 'needs_vesper': 4,
+    };
+
+    const columns = document.querySelectorAll('#kanban-board .column');
+    const colIdx = columnSelectors[task.status];
+    if (colIdx === undefined || !columns[colIdx]) return;
+
+    const column = columns[colIdx];
+    const targetContainer = colIdx === 2
+        ? (document.getElementById('done-task-list') || column)
+        : column;
+
+    // Remove existing card for this task (if moving columns)
+    removeTaskCard(task.id);
+
+    // Insert new card before the empty state div if present, or at the end
+    const emptyState = colIdx === 2
+        ? column.querySelector('.done-empty-state')
+        : column.querySelector('.empty-state');
+    const newCardHtml = createTaskCard(task);
+    const temp = document.createElement('div');
+    temp.innerHTML = newCardHtml;
+    const newCard = temp.firstElementChild;
+
+    if (emptyState) {
+        // Remove empty state if it exists (and there wasn't one before)
+        const existingCards = targetContainer.querySelectorAll('.task-card');
+        let hadCardsBefore = false;
+        for (let i = 0; i < existingCards.length; i++) {
+            // This empty state detection may miss if only one task existed before
+            if (existingCards[i].getAttribute('data-task-id') !== String(task.id)) {
+                hadCardsBefore = true;
+                break;
+            }
+        }
+        if (!hadCardsBefore) {
+            emptyState.remove();
+        }
+    }
+
+    // Insert sorted by priority then created_at
+    const cards = targetContainer.querySelectorAll('.task-card');
+    let inserted = false;
+    for (let i = 0; i < cards.length; i++) {
+        const otherId = cards[i].getAttribute('data-task-id');
+        if (otherId === String(task.id)) continue; // skip if we're replacing
+        // Simple: insert based on priority (lower = higher priority)
+        const otherPriority = parseInt(cards[i].className.match(/priority-(\d)/)?.[1] || 3);
+        if (task.priority < otherPriority || (task.priority === otherPriority && task.id < parseInt(otherId))) {
+            targetContainer.insertBefore(newCard, cards[i]);
+            inserted = true;
+            break;
+        }
+    }
+    if (!inserted) {
+        targetContainer.appendChild(newCard);
+    }
+
+    if (colIdx === 2) {
+        refreshDonePanelMeta();
+    }
+
+    // Update stats bar
+    updateStats();
+
+    // Update telemetry panels
+    updateTelemetry();
+});
+
+// Remove a task card from the board
+function removeTaskCard(taskId) {
+    const card = document.querySelector(`.task-card[data-task-id="${taskId}"]`);
+    if (card) {
+        const inDonePanel = !!card.closest('#done-task-list');
+        card.remove();
+        if (inDonePanel) refreshDonePanelMeta();
+    }
+}
+
+// Update stats bar by re-fetching
+function updateStats() {
+    fetch('/api/stats')
+        .then(r => r.json())
+        .then(data => {
+            const statsBar = document.getElementById('stats-bar');
+            const statuses = ['pending', 'assigned', 'claimed', 'in_progress', 'submitted',
+                'in_review', 'needs_revision', 'completed', 'failed', 'timed_out',
+                'blocked', 'released', 'needs_human', 'needs_vesper', 'dead'];
+            statuses.forEach(s => {
+                const el = statsBar.querySelector(`.stat-card.${s} .stat-count`);
+                if (el) el.textContent = data.by_status[s] || 0;
+            });
+        })
+        .catch(() => {});
+}
+
+socket.on('agent_update', (agent) => {
+    // Re-fetch the agent list and update
+    fetchAgents();
+});
+
+socket.on('new_event', (event) => {
+    const eventList = document.getElementById('event-list');
+    if (!eventList) return;
+
+    // Remove empty state if present
+    const empty = eventList.querySelector('.empty-state');
+    if (empty) empty.remove();
+
+    // Create new event item
+    const item = document.createElement('div');
+    item.className = 'event-item';
+    item.innerHTML = `<span class="event-type-badge event-${event.event_type}">${event.event_type}</span>
+        <span class="event-agent">${event.agent || '—'}</span>
+        <span class="event-task-ref">#${event.task_id}</span>
+        <span class="event-time">${event.created_at || ''}</span>`;
+
+    // Insert at the top
+    eventList.insertBefore(item, eventList.firstChild);
+
+    // Keep max 20 events
+    while (eventList.children.length > 20) {
+        eventList.removeChild(eventList.lastChild);
+    }
+});
+
+function fetchAgents() {
+    fetch('/api/agents')
+        .then(r => r.json())
+        .then(data => {
+            const agentList = document.getElementById('agent-list');
+            if (!agentList) return;
+
+            // Build lookup for quick updates
+            const agents = data.agents;
+            agentList.innerHTML = agents.map(a => {
+                const load = a.active_tasks || 0;
+                const hb = a.last_heartbeat;
+                let hbAge = 'Never';
+                if (hb) {
+                    const diff = Date.now() - new Date(hb + 'Z').getTime();
+                    const secs = Math.floor(diff / 1000);
+                    if (secs < 60) hbAge = secs + 's ago';
+                    else if (secs < 3600) hbAge = Math.floor(secs / 60) + 'm ago';
+                    else if (secs < 86400) hbAge = Math.floor(secs / 3600) + 'h ago';
+                    else hbAge = Math.floor(secs / 86400) + 'd ago';
+                }
+
+                return `<a href="/agent/${a.name}" class="agent-card-link">
+                    <div class="agent-card status-${a.status}">
+                        <div class="agent-name">${a.display_name}</div>
+                        <div class="agent-model">${a.model || ''}</div>
+                        <div class="agent-skills">${(a.skills || '').split(',').filter(s => s.trim()).map(s => `<span class="skill-badge">${s.trim()}</span>`).join('')}</div>
+                        <div class="agent-stats">
+                            <span>✅ ${a.tasks_completed || 0}</span>
+                            <span>❌ ${a.tasks_failed || 0}</span>
+                            <span>⭐ ${(a.reputation_score || 0).toFixed(1)}</span>
+                            <span>📊 ${load}/${a.max_concurrent || 3}</span>
+                            <span class="role-badge">${a.role || 'worker'}</span>
+                            <span class="status-badge ${a.status}">${a.status}</span>
+                        </div>
+                        <div class="agent-heartbeat">
+                            <span class="heartbeat-label">⏱️ Last seen:</span>
+                            <span class="heartbeat-value">${hbAge}</span>
+                        </div>
+                    </div>
+                </a>`;
+            }).join('');
+        })
+        .catch(() => {});
+}
+
+// ── Telemetry panel updates ──────────────────────────────
+function updateTelemetry() {
+    fetch('/api/telemetry')
+        .then(r => r.json())
+        .then(data => {
+            // 1. Throughput bar chart
+            const chartEl = document.getElementById('throughput-chart');
+            if (chartEl) {
+                if (!data.throughput || data.throughput.length === 0) {
+                    chartEl.innerHTML = '<div class="throughput-empty">No data</div>';
+                } else {
+                    const counts = data.throughput.map(b => b.count);
+                    const maxVal = Math.max(...counts, 1);
+                    const bars = data.throughput.map(b => {
+                        const pct = (b.count / maxVal) * 100;
+                        const timeStr = new Date(b.bucket + 'Z').toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                        return `<div class="throughput-bar-wrapper">
+                            <div class="throughput-bar" style="height: ${pct}%" title="${b.count} tasks at ${timeStr}"></div>
+                            <span class="throughput-label">${timeStr}</span>
+                        </div>`;
+                    }).join('');
+                    chartEl.innerHTML = bars;
+                }
+            }
+
+            // 2. Success rate gauge
+            const gaugeFill = document.querySelector('#gauge-svg .gauge-fill');
+            const gaugeText = document.querySelector('#gauge-svg .gauge-text');
+            if (gaugeFill && gaugeText) {
+                const circumference = 2 * Math.PI * 50; // r=50
+                const pct = Math.min(data.success_rate || 0, 100);
+                const dashLen = (pct / 100) * circumference;
+                gaugeFill.setAttribute('stroke-dasharray', `${dashLen.toFixed(1)} ${circumference.toFixed(1)}`);
+                gaugeText.textContent = pct + '%';
+            }
+
+            // 3. Avg completion time
+            const avgVal = document.getElementById('avg-time-value');
+            const avgUnit = document.getElementById('avg-time-unit');
+            if (avgVal && avgUnit) {
+                const secs = data.avg_completion_time_seconds || 0;
+                if (secs < 60) {
+                    avgVal.textContent = Math.round(secs);
+                    avgUnit.textContent = 's';
+                } else if (secs < 3600) {
+                    avgVal.textContent = (secs / 60).toFixed(1);
+                    avgUnit.textContent = 'min';
+                } else {
+                    avgVal.textContent = (secs / 3600).toFixed(2);
+                    avgUnit.textContent = 'hr';
+                }
+            }
+
+            // 4. Agent utilization heatmap
+            const utilList = document.getElementById('agent-util-list');
+            if (utilList) {
+                if (!data.agent_utilization || data.agent_utilization.length === 0) {
+                    utilList.innerHTML = '<div class="util-empty">No agents</div>';
+                } else {
+                    const items = data.agent_utilization.map(a => {
+                        const pct = Math.round(a.ratio * 100);
+                        return `<div class="util-item">
+                            <span class="util-name">${a.display_name}</span>
+                            <div class="util-bar-bg">
+                                <div class="util-bar-fill util-${a.color}" style="width: ${pct}%"></div>
+                            </div>
+                            <span class="util-ratio">${a.active}/${a.max_concurrent}</span>
+                        </div>`;
+                    }).join('');
+                    utilList.innerHTML = items;
+                }
+            }
+        })
+        .catch(() => {});
+}
+
+// ── Leaderboard panel updates ──────────────────────────────
+function updateLeaderboard() {
+    fetch('/api/agents/xp/leaderboard', { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+            const tbody = document.getElementById('leaderboard-body');
+            if (!tbody) return;
+            const agents = data.leaderboard || [];
+            if (agents.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" class="leaderboard-empty">No agents</td></tr>';
+                return;
+            }
+            tbody.innerHTML = agents.map((a, i) => {
+                const rank = i + 1;
+                const streakHtml = a.streak > 0 ? '🔥' : '—';
+                const lvlColors = {
+                    'Rookie': '#8a9ba8',
+                    'Operative': '#4a9eff',
+                    'Specialist': '#00e676',
+                    'Expert': '#ffb300',
+                    'Commander': '#ff4081',
+                };
+                const lvlColor = lvlColors[a.level_name] || '#8a9ba8';
+                const status = a.status || 'unknown';
+                return `<tr>
+                    <td class="lb-rank">${rank}</td>
+                    <td class="lb-name">${a.display_name || a.name}</td>
+                    <td><span class="lb-level-badge" style="background:${lvlColor}22; color:${lvlColor}; border-color:${lvlColor}55;">${a.level_name || 'Rookie'}</span></td>
+                    <td class="lb-xp">${(a.xp || 0).toLocaleString()}</td>
+                    <td class="lb-streak">${streakHtml}</td>
+                    <td><span class="lb-status status-badge ${status}">${status}</span></td>
+                </tr>`;
+            }).join('');
+        })
+        .catch(() => {});
+}
+
+// Real-time refresh on task updates
+socket.on('task_update', () => { updateLeaderboard(); });
+
+// Initial load on page ready
+document.addEventListener('DOMContentLoaded', () => {
+    updateLeaderboard();
+});
+
+// ── Keep auto-refresh as fallback ───────────────────────
 let refreshInterval = 30000;
 let refreshTimer = null;
 
@@ -353,46 +903,40 @@ function startAutoRefresh() {
 }
 
 function refreshDashboard() {
+    // Only use fallback if socket is disconnected
+    if (socket.connected) return;
+
     const indicator = document.getElementById('refresh-indicator');
-    if (indicator) indicator.textContent = 'Refreshing...';
+    if (indicator) indicator.textContent = 'Polling...';
 
     fetch(window.location.href, {
         headers: { 'X-Requested-With': 'XMLHttpRequest' }
     })
     .then(response => response.text())
     .then(html => {
-        // Parse the new HTML and update the kanban board, agents, events sections
         const parser = new DOMParser();
         const doc = parser.parseFromString(html, 'text/html');
-        
+
         const newBoard = doc.getElementById('kanban-board');
         const oldBoard = document.getElementById('kanban-board');
-        if (newBoard && oldBoard) {
-            oldBoard.innerHTML = newBoard.innerHTML;
-        }
+        if (newBoard && oldBoard) oldBoard.innerHTML = newBoard.innerHTML;
 
         const newAgents = doc.querySelector('.agent-list');
         const oldAgents = document.querySelector('.agent-list');
-        if (newAgents && oldAgents) {
-            oldAgents.innerHTML = newAgents.innerHTML;
-        }
+        if (newAgents && oldAgents) oldAgents.innerHTML = newAgents.innerHTML;
 
         const newEvents = doc.querySelector('#event-list');
         const oldEvents = document.querySelector('#event-list');
-        if (newEvents && oldEvents) {
-            oldEvents.innerHTML = newEvents.innerHTML;
-        }
+        if (newEvents && oldEvents) oldEvents.innerHTML = newEvents.innerHTML;
 
         const newStats = doc.querySelector('.stats-bar');
         const oldStats = document.querySelector('.stats-bar');
-        if (newStats && oldStats) {
-            oldStats.innerHTML = newStats.innerHTML;
-        }
+        if (newStats && oldStats) oldStats.innerHTML = newStats.innerHTML;
 
-        if (indicator) indicator.textContent = 'Auto-refreshing every 30s — Last updated: ' + new Date().toLocaleTimeString();
+        if (indicator) indicator.textContent = 'Polling fallback — Last: ' + new Date().toLocaleTimeString();
     })
     .catch(() => {
-        if (indicator) indicator.textContent = 'Refresh failed — will retry';
+        if (indicator) indicator.textContent = 'Poll failed — will retry';
     });
 }
 
@@ -401,12 +945,14 @@ function applyFilters() {
     const status = document.getElementById('filter-status').value;
     const agent = document.getElementById('filter-agent').value;
     const project = document.getElementById('filter-project').value;
-    
+    const priority = document.getElementById('filter-priority').value;
+
     const params = new URLSearchParams();
     if (status) params.set('status', status);
     if (agent) params.set('agent', agent);
     if (project) params.set('project', project);
-    
+    if (priority) params.set('priority', priority);
+
     const qs = params.toString();
     window.location.href = window.location.pathname + (qs ? '?' + qs : '');
 }
@@ -415,7 +961,457 @@ function resetFilters() {
     window.location.href = '/';
 }
 
-// Start auto-refresh on page load
-document.addEventListener('DOMContentLoaded', startAutoRefresh);
+// Start fallback auto-refresh on page load
+document.addEventListener('DOMContentLoaded', () => {
+    startAutoRefresh();
+    updateTelemetry();
+});
+
+// ── Command Palette (Cmd+K) ────────────────────────────────
+(function() {
+    'use strict';
+
+    // ── App data from template ────────────────────────────
+    const STATUSES = {{ all_statuses | tojson }};
+    const AGENTS = [
+        {% for a in agents %}
+        { name: {{ a.name | tojson }}, display_name: {{ a.display_name | tojson }} }{% if not loop.last %},{% endif %}
+        {% endfor %}
+    ];
+    const PROJECTS = {{ all_projects | tojson }};
+
+    // ── Fuzzy matcher ─────────────────────────────────────
+    function fuzzyMatch(query, target) {
+        if (!query) return false;
+        query = query.toLowerCase();
+        target = target.toLowerCase();
+        let qi = 0;
+        for (let ti = 0; ti < target.length && qi < query.length; ti++) {
+            if (query[qi] === target[ti]) qi++;
+        }
+        return qi === query.length;
+    }
+
+    function scoreMatch(query, target) {
+        // Higher score = better match
+        if (!query) return 0;
+        query = query.toLowerCase();
+        target = target.toLowerCase();
+        if (target === query) return 1000;
+        if (target.startsWith(query)) return 500;
+        if (target.includes(query)) return 200;
+        let qi = 0, score = 0;
+        for (let ti = 0; ti < target.length && qi < query.length; ti++) {
+            if (query[qi] === target[ti]) {
+                qi++;
+                score += (ti === 0) ? 10 : 1;
+            }
+        }
+        return (qi === query.length) ? score : 0;
+    }
+
+    // ── Command tree ──────────────────────────────────────
+    let currentStack = ['root'];
+    let selectedIndex = 0;
+
+    function buildRootCommands() {
+        const cmds = [
+            { id: 'create-task', label: 'Create Task', icon: '＋', desc: 'Create a new task', type: 'action' },
+            { id: 'filter-status', label: 'Filter by Status', icon: '◎', desc: 'Filter tasks by status', type: 'submenu', children: 'statuses' },
+            { id: 'filter-agent', label: 'Filter by Agent', icon: '👤', desc: 'Filter tasks by agent', type: 'submenu', children: 'agents' },
+            { id: 'filter-project', label: 'Filter by Project', icon: '📁', desc: 'Filter tasks by project', type: 'submenu', children: 'projects' },
+            { id: 'dashboard', label: 'Go to Dashboard', icon: '⌂', desc: 'Navigate to the dashboard', type: 'action' },
+            { id: 'triage-queue', label: 'Triage Queue', icon: '⚑', desc: 'Filter to triage status', type: 'action' },
+            { id: 'view-telemetry', label: 'View Telemetry', icon: '📊', desc: 'Scroll to telemetry section', type: 'action' },
+        ];
+        // Add per-agent commands
+        AGENTS.forEach(a => {
+            cmds.push({
+                id: 'agent-' + a.name,
+                label: 'Go to Agent: ' + a.display_name,
+                icon: '🤖',
+                desc: 'View ' + a.display_name + ' details',
+                type: 'action',
+                agent: a.name
+            });
+        });
+        return cmds;
+    }
+
+    function getSubCommands(type) {
+        if (type === 'statuses') {
+            return STATUSES.map(s => ({
+                id: 'status-' + s,
+                label: s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+                icon: '◎',
+                desc: 'Filter by ' + s.replace(/_/g, ' '),
+                type: 'status',
+                value: s
+            }));
+        }
+        if (type === 'agents') {
+            return AGENTS.map(a => ({
+                id: 'agent-filter-' + a.name,
+                label: a.display_name,
+                icon: '👤',
+                desc: 'Filter tasks by ' + a.display_name,
+                type: 'agent',
+                value: a.name
+            }));
+        }
+        if (type === 'projects') {
+            return PROJECTS.map(p => ({
+                id: 'project-' + p,
+                label: p,
+                icon: '📁',
+                desc: 'Filter tasks by project: ' + p,
+                type: 'project',
+                value: p
+            }));
+        }
+        return [];
+    }
+
+    function getBackCommand() {
+        return { id: 'back', label: '← Back', icon: '◀', desc: 'Go back', type: 'back' };
+    }
+
+    function getCurrentCommands() {
+        const stack = currentStack;
+        if (stack.length === 1) {
+            return buildRootCommands();
+        }
+        const current = stack[stack.length - 1];
+        const cmds = getSubCommands(current);
+        return [getBackCommand(), ...cmds];
+    }
+
+    // ── Render ────────────────────────────────────────────
+    function renderResults(filtered) {
+        const container = document.getElementById('cmd-results');
+        if (!container) return;
+        if (filtered.length === 0) {
+            container.innerHTML = '<div class="cmd-empty">No matching commands</div>';
+            return;
+        }
+        container.innerHTML = filtered.map((cmd, i) => {
+            const sel = i === selectedIndex ? ' cmd-selected' : '';
+            return `<div class="cmd-item${sel}" data-index="${i}">
+                <span class="cmd-item-icon">${cmd.icon || '▸'}</span>
+                <div class="cmd-item-body">
+                    <span class="cmd-item-label">${cmd.label}</span>
+                    <span class="cmd-item-desc">${cmd.desc || ''}</span>
+                </div>
+            </div>`;
+        }).join('');
+        // Scroll selected into view
+        const selectedEl = container.querySelector('.cmd-selected');
+        if (selectedEl) {
+            selectedEl.scrollIntoView({ block: 'nearest' });
+        }
+    }
+
+    // ── Search ────────────────────────────────────────────
+    function performSearch(query) {
+        const cmds = getCurrentCommands();
+        let filtered;
+        if (!query.trim()) {
+            filtered = cmds;
+        } else {
+            filtered = cmds.filter(cmd => fuzzyMatch(query, cmd.label) || fuzzyMatch(query, cmd.desc));
+            // Sort by score
+            filtered.sort((a, b) => {
+                const sa = Math.max(scoreMatch(query, a.label), scoreMatch(query, a.desc));
+                const sb = Math.max(scoreMatch(query, b.label), scoreMatch(query, b.desc));
+                return sb - sa;
+            });
+        }
+        if (selectedIndex >= filtered.length) selectedIndex = 0;
+        renderResults(filtered);
+        return filtered;
+    }
+
+    let currentResults = [];
+
+    // ── Execute command ──────────────────────────────────
+    function executeCommand(cmd) {
+        if (!cmd) return;
+        if (cmd.type === 'back') {
+            currentStack.pop();
+            selectedIndex = 0;
+            const input = document.getElementById('cmd-input');
+            if (input) {
+                input.value = '';
+                input.focus();
+            }
+            currentResults = performSearch('');
+            return;
+        }
+        if (cmd.type === 'submenu') {
+            currentStack.push(cmd.children);
+            selectedIndex = 0;
+            const input = document.getElementById('cmd-input');
+            if (input) {
+                input.value = '';
+                input.focus();
+            }
+            currentResults = performSearch('');
+            return;
+        }
+        if (cmd.type === 'status') {
+            closePalette();
+            const select = document.getElementById('filter-status');
+            if (select) {
+                select.value = cmd.value;
+                applyFilters();
+            }
+            return;
+        }
+        if (cmd.type === 'agent') {
+            closePalette();
+            const select = document.getElementById('filter-agent');
+            if (select) {
+                select.value = cmd.value;
+                applyFilters();
+            }
+            return;
+        }
+        if (cmd.type === 'project') {
+            closePalette();
+            const select = document.getElementById('filter-project');
+            if (select) {
+                select.value = cmd.value;
+                applyFilters();
+            }
+            return;
+        }
+        if (cmd.id === 'create-task') {
+            showCreateForm();
+            return;
+        }
+        if (cmd.id === 'dashboard') {
+            closePalette();
+            window.location.href = '/';
+            return;
+        }
+        if (cmd.id === 'triage-queue') {
+            closePalette();
+            const select = document.getElementById('filter-status');
+            if (select) {
+                select.value = 'triage';
+                applyFilters();
+            }
+            return;
+        }
+        if (cmd.id === 'view-telemetry') {
+            closePalette();
+            const telemetry = document.querySelector('.telemetry-section');
+            if (telemetry) {
+                telemetry.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+            return;
+        }
+        if (cmd.id && cmd.id.startsWith('agent-')) {
+            closePalette();
+            window.location.href = '/agent/' + cmd.agent;
+            return;
+        }
+    }
+
+    // ── Create Task inline form ───────────────────────────
+    function showCreateForm() {
+        const container = document.getElementById('cmd-results');
+        if (!container) return;
+        container.innerHTML = `
+            <div class="cmd-create-form">
+                <div class="cmd-create-field">
+                    <label>Title</label>
+                    <input type="text" id="cmd-create-title" class="cmd-create-input" placeholder="Task title..." autofocus>
+                </div>
+                <div class="cmd-create-field">
+                    <label>Priority</label>
+                    <select id="cmd-create-priority" class="cmd-create-select">
+                        <option value="3">P3 — Medium</option>
+                        <option value="1">P1 — Critical</option>
+                        <option value="2">P2 — High</option>
+                        <option value="4">P4 — Low</option>
+                        <option value="5">P5 — Backlog</option>
+                    </select>
+                </div>
+                <div class="cmd-create-field">
+                    <label>Tags</label>
+                    <input type="text" id="cmd-create-tags" class="cmd-create-input" placeholder="tag1, tag2, ...">
+                </div>
+                <div class="cmd-create-actions">
+                    <button id="cmd-create-submit" class="cmd-btn cmd-btn-primary">Create Task</button>
+                    <button id="cmd-create-cancel" class="cmd-btn cmd-btn-secondary">Cancel</button>
+                </div>
+            </div>`;
+        // Focus title input
+        const titleInput = document.getElementById('cmd-create-title');
+        if (titleInput) titleInput.focus();
+        // Submit handler
+        const submitBtn = document.getElementById('cmd-create-submit');
+        if (submitBtn) {
+            submitBtn.addEventListener('click', submitCreateTask);
+        }
+        const cancelBtn = document.getElementById('cmd-create-cancel');
+        if (cancelBtn) {
+            cancelBtn.addEventListener('click', () => {
+                currentStack = ['root'];
+                selectedIndex = 0;
+                const input = document.getElementById('cmd-input');
+                if (input) { input.value = ''; input.focus(); }
+                currentResults = performSearch('');
+            });
+        }
+        // Also submit on Enter in title
+        if (titleInput) {
+            titleInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') submitCreateTask();
+                if (e.key === 'Escape') {
+                    const input = document.getElementById('cmd-input');
+                    if (input) { input.value = ''; input.focus(); }
+                    currentStack = ['root'];
+                    selectedIndex = 0;
+                    currentResults = performSearch('');
+                }
+            });
+        }
+    }
+
+    function submitCreateTask() {
+        const title = document.getElementById('cmd-create-title');
+        const priority = document.getElementById('cmd-create-priority');
+        const tags = document.getElementById('cmd-create-tags');
+        if (!title || !title.value.trim()) {
+            if (title) title.focus();
+            return;
+        }
+        const body = {
+            title: title.value.trim(),
+            priority: parseInt(priority ? priority.value : '3'),
+            tags: tags && tags.value.trim() ? tags.value.trim() : '',
+        };
+        fetch('/api/tasks', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        })
+        .then(r => r.json())
+        .then(() => {
+            closePalette();
+            // Refresh the page to show new task
+            window.location.reload();
+        })
+        .catch(() => {});
+    }
+
+    // ── Open / Close ──────────────────────────────────────
+    function openPalette() {
+        const overlay = document.getElementById('cmd-palette-overlay');
+        const input = document.getElementById('cmd-input');
+        if (!overlay) return;
+        overlay.classList.remove('hidden');
+        currentStack = ['root'];
+        selectedIndex = 0;
+        if (input) {
+            input.value = '';
+            setTimeout(() => input.focus(), 50);
+        }
+        currentResults = performSearch('');
+    }
+
+    function closePalette() {
+        const overlay = document.getElementById('cmd-palette-overlay');
+        if (overlay) overlay.classList.add('hidden');
+    }
+
+    // ── Keyboard handlers ─────────────────────────────────
+    document.addEventListener('keydown', function(e) {
+        // Cmd+K or Ctrl+K — open palette
+        if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+            e.preventDefault();
+            const overlay = document.getElementById('cmd-palette-overlay');
+            if (overlay && overlay.classList.contains('hidden')) {
+                openPalette();
+            } else {
+                closePalette();
+            }
+            return;
+        }
+        // If palette is not open, ignore
+        const overlay = document.getElementById('cmd-palette-overlay');
+        if (!overlay || overlay.classList.contains('hidden')) return;
+
+        // Escape — close
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            closePalette();
+            return;
+        }
+
+        // Check if we're in create form mode
+        const createForm = document.querySelector('.cmd-create-form');
+        if (createForm) {
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                closePalette();
+            }
+            return;
+        }
+
+        // Arrow keys — navigate
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            selectedIndex = Math.min(selectedIndex + 1, currentResults.length - 1);
+            renderResults(currentResults);
+            return;
+        }
+        if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            selectedIndex = Math.max(selectedIndex - 1, 0);
+            renderResults(currentResults);
+            return;
+        }
+
+        // Enter — execute selected
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            const cmd = currentResults[selectedIndex];
+            if (cmd) executeCommand(cmd);
+            return;
+        }
+    });
+
+    // ── Search input handler ──────────────────────────────
+    const searchInput = document.getElementById('cmd-input');
+    if (searchInput) {
+        searchInput.addEventListener('input', function() {
+            selectedIndex = 0;
+            currentResults = performSearch(this.value);
+        });
+    }
+
+    // ── Click overlay to close ────────────────────────────
+    const overlay = document.getElementById('cmd-palette-overlay');
+    if (overlay) {
+        overlay.addEventListener('click', function(e) {
+            if (e.target === this) closePalette();
+        });
+    }
+
+    // ── Click results to select ───────────────────────────
+    document.addEventListener('click', function(e) {
+        const item = e.target.closest('.cmd-item');
+        if (!item) return;
+        const idx = parseInt(item.getAttribute('data-index'), 10);
+        if (idx >= 0 && idx < currentResults.length) {
+            selectedIndex = idx;
+            executeCommand(currentResults[idx]);
+        }
+    });
+
+})();
 </script>
 {% endblock %}

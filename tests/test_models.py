@@ -403,8 +403,9 @@ class TestStateMachineTransitions:
     def test_all_transition_paths(self):
         # Verify all valid transitions described in the spec
         expected = {
-            'pending':      frozenset(['assigned', 'blocked', 'needs_human', 'needs_vesper']),
-            'assigned':     frozenset(['claimed', 'blocked', 'needs_human', 'needs_vesper', 'pending']),
+            'triage':       frozenset(['pending', 'assigned', 'needs_human', 'needs_vesper', 'blocked', 'failed']),
+            'pending':      frozenset(['assigned', 'blocked', 'needs_human', 'needs_vesper', 'triage']),
+            'assigned':     frozenset(['claimed', 'blocked', 'needs_human', 'needs_vesper', 'pending', 'completed']),
             'claimed':      frozenset(['in_progress', 'released', 'timed_out', 'blocked',
                                        'needs_human', 'needs_vesper']),
             'in_progress':  frozenset(['submitted', 'released', 'timed_out', 'blocked',

@@ -853,7 +853,7 @@ class TestTemplateLifecycleIntegration:
         assert resp.status_code == 200
         assert resp.get_json()["status"] == "in_progress"
 
-        resp = client.post(f"/api/tasks/{task_id}/submit", json={
+        resp = client.post(f"/api/tasks/{task_id}/submit?skip_wait=true", json={
             "agent": "qa",
             "result": "All tests passed",
         })
@@ -896,7 +896,7 @@ class TestTemplateLifecycleIntegration:
             return
 
         client.post(f"/api/tasks/{task_id}/start", json={"agent": "devops"})
-        client.post(f"/api/tasks/{task_id}/submit", json={
+        client.post(f"/api/tasks/{task_id}/submit?skip_wait=true", json={
             "agent": "devops",
             "result": "Deployed successfully",
         })

@@ -1,15 +1,29 @@
 {% extends "base.html" %}
 {% block title %}Task #{{ task.id }} — Task Board{% endblock %}
 
+{% block breadcrumbs %}
+<nav class="breadcrumbs">
+    <a href="/">Dashboard</a>
+    <span class="breadcrumb-sep">›</span>
+    <a href="/tasks">Tasks</a>
+    <span class="breadcrumb-sep">›</span>
+    <span>Task #{{ task.id }}</span>
+</nav>
+{% endblock %}
+
 {% block content %}
 <div class="task-detail">
     <div class="task-detail-header">
-        <a href="/" class="back-link">← Back to Dashboard</a>
+        <a href="/tasks" class="back-link">← Back to Tasks</a>
         <h1>{{ task.title }}</h1>
-        <span class="status-badge large {{ task.status }}">{{ task.status }}</span>
-        {% if task.attempts %}
-        <span class="attempts-badge">Attempt {{ task.attempts }}/{{ task.max_attempts }}</span>
-        {% endif %}
+        <div class="task-detail-badges">
+            <span class="status-badge large {{ task.status }}">{{ task.status }}</span>
+            <a href="/task/{{ task.id }}/timeline" class="timeline-link">📅 View Timeline</a>
+            <a href="/task/{{ task.id }}/audit" class="timeline-link audit-link">⧫ View Audit</a>
+            {% if task.attempts %}
+            <span class="attempts-badge">Attempt {{ task.attempts }}/{{ task.max_attempts }}</span>
+            {% endif %}
+        </div>
     </div>
 
     <div class="task-detail-grid">
@@ -45,11 +59,11 @@
             <h3>Assignment</h3>
             <div class="detail-row">
                 <span class="detail-label">Assigned To</span>
-                <span class="detail-value">{{ task.assigned_to or '—' }}</span>
+                <span class="detail-value">{{ agent_labels.get(task.assigned_to, task.assigned_to) or '—' }}</span>
             </div>
             <div class="detail-row">
                 <span class="detail-label">Claimed By</span>
-                <span class="detail-value">{{ task.claimed_by or '—' }}</span>
+                <span class="detail-value">{{ agent_labels.get(task.claimed_by, task.claimed_by) or '—' }}</span>
             </div>
             <div class="detail-row">
                 <span class="detail-label">Lease Expires</span>

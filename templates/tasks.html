@@ -1,0 +1,171 @@
+{% extends "base.html" %}
+{% block title %}Tasks — Command Center{% endblock %}
+
+{% block breadcrumbs %}
+<nav class="breadcrumbs">
+    <a href="/">Dashboard</a>
+    <span class="breadcrumb-sep">›</span>
+    <span>Tasks</span>
+</nav>
+{% endblock %}
+
+{% block content %}
+<div class="dashboard-header">
+    <h1>Task List</h1>
+</div>
+
+<!-- Filter Bar -->
+<div class="filter-bar">
+    <div class="filter-group">
+        <label for="filter-status">Status</label>
+        <select id="filter-status" class="filter-select" onchange="applyFilters()">
+            <option value="">All Statuses</option>
+            {% for status in all_statuses %}
+            <option value="{{ status }}" {% if request.args.get('status') == status %}selected{% endif %}>{{ status|replace('_', ' ')|title }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="filter-group">
+        <label for="filter-agent">Agent</label>
+        <select id="filter-agent" class="filter-select" onchange="applyFilters()">
+            <option value="">All Agents</option>
+            {% for agent in agents %}
+            <option value="{{ agent.name }}" {% if request.args.get('agent') == agent.name %}selected{% endif %}>{{ agent.display_name }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="filter-group">
+        <label for="filter-project">Project</label>
+        <select id="filter-project" class="filter-select" onchange="applyFilters()">
+            <option value="">All Projects</option>
+            {% for project in all_projects %}
+            <option value="{{ project }}" {% if request.args.get('project') == project %}selected{% endif %}>{{ project }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="filter-group">
+        <label for="filter-priority">Priority</label>
+        <select id="filter-priority" class="filter-select" onchange="applyFilters()">
+            <option value="">All Priorities</option>
+            <option value="1" {% if request.args.get('priority') == '1' %}selected{% endif %}>P1 — Critical</option>
+            <option value="2" {% if request.args.get('priority') == '2' %}selected{% endif %}>P2 — High</option>
+            <option value="3" {% if request.args.get('priority') == '3' %}selected{% endif %}>P3 — Medium</option>
+            <option value="4" {% if request.args.get('priority') == '4' %}selected{% endif %}>P4 — Low</option>
+            <option value="5" {% if request.args.get('priority') == '5' %}selected{% endif %}>P5 — Backlog</option>
+        </select>
+    </div>
+    <button class="filter-reset" onclick="resetFilters()">⟳ Reset</button>
+</div>
+
+<!-- Sortable Task Table -->
+<div class="tasks-table-wrapper">
+    <table class="tasks-table" id="tasks-table">
+        <thead>
+            <tr>
+                <th data-sort="id" class="sortable">ID <span class="sort-arrow"></span></th>
+                <th data-sort="title" class="sortable">Title <span class="sort-arrow"></span></th>
+                <th data-sort="status" class="sortable">Status <span class="sort-arrow"></span></th>
+                <th data-sort="priority" class="sortable">Priority <span class="sort-arrow"></span></th>
+                <th data-sort="assigned" class="sortable">Assigned To <span class="sort-arrow"></span></th>
+                <th data-sort="created" class="sortable">Created <span class="sort-arrow"></span></th>
+                <th data-sort="updated" class="sortable">Updated <span class="sort-arrow"></span></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% if tasks %}
+            {% for task in tasks %}
+            <tr class="task-row" onclick="window.location='/task/{{ task.id }}'" data-task-id="{{ task.id }}">
+                <td class="task-id-cell">#{{ task.id }}</td>
+                <td class="task-title-cell">{{ task.title }}</td>
+                <td><span class="status-badge {{ task.status }}">{{ task.status|replace('_', ' ') }}</span></td>
+                <td><span class="priority priority-{{ task.priority }}">P{{ task.priority }}</span></td>
+                <td class="task-assigned-cell">{{ agent_labels.get(task.assigned_to or task.claimed_by, task.assigned_to or task.claimed_by) or '—' }}</td>
+                <td class="task-date-cell">{{ task.created_at.strftime('%Y-%m-%d %H:%M') if task.created_at else '—' }}</td>
+                <td class="task-date-cell">{{ task.updated_at.strftime('%Y-%m-%d %H:%M') if task.updated_at else '—' }}</td>
+            </tr>
+            {% endfor %}
+            {% else %}
+            <tr>
+                <td colspan="7" class="tasks-empty">
+                    <div class="empty-state">No tasks yet — create one with <kbd>Cmd+K</kbd></div>
+                </td>
+            </tr>
+            {% endif %}
+        </tbody>
+    </table>
+</div>
+
+<script>
+function applyFilters() {
+    const params = new URLSearchParams(window.location.search);
+    ['status', 'agent', 'project', 'priority'].forEach(key => {
+        const el = document.getElementById('filter-' + key);
+        if (el) {
+            if (el.value) params.set(key, el.value);
+            else params.delete(key);
+        }
+    });
+    const qs = params.toString();
+    window.location.href = '/tasks' + (qs ? '?' + qs : '');
+}
+
+function resetFilters() {
+    window.location.href = '/tasks';
+}
+
+// Client-side sorting
+document.addEventListener('DOMContentLoaded', function() {
+    const table = document.getElementById('tasks-table');
+    if (!table) return;
+    const headers = table.querySelectorAll('th.sortable');
+    headers.forEach(header => {
+        header.addEventListener('click', function() {
+            const tbody = table.querySelector('tbody');
+            const rows = Array.from(tbody.querySelectorAll('tr'));
+            const key = this.dataset.sort;
+            const isAsc = this.classList.contains('sort-asc');
+            
+            // Remove sort classes from all headers
+            headers.forEach(h => { h.classList.remove('sort-asc', 'sort-desc'); });
+            this.classList.add(isAsc ? 'sort-desc' : 'sort-asc');
+            
+            const multiplier = isAsc ? -1 : 1;
+            rows.sort((a, b) => {
+                let aVal, bVal;
+                switch (key) {
+                    case 'id':
+                        aVal = parseInt(a.dataset.taskId || a.querySelector('.task-id-cell')?.textContent.replace('#','') || '0');
+                        bVal = parseInt(b.dataset.taskId || b.querySelector('.task-id-cell')?.textContent.replace('#','') || '0');
+                        return (aVal - bVal) * multiplier;
+                    case 'title':
+                        aVal = (a.querySelector('.task-title-cell')?.textContent || '').toLowerCase();
+                        bVal = (b.querySelector('.task-title-cell')?.textContent || '').toLowerCase();
+                        return aVal.localeCompare(bVal) * multiplier;
+                    case 'priority':
+                        aVal = parseInt((a.querySelector('.priority')?.textContent || 'P3').replace('P',''));
+                        bVal = parseInt((b.querySelector('.priority')?.textContent || 'P3').replace('P',''));
+                        return (aVal - bVal) * multiplier;
+                    case 'status':
+                        aVal = (a.querySelector('.status-badge')?.textContent || '').toLowerCase();
+                        bVal = (b.querySelector('.status-badge')?.textContent || '').toLowerCase();
+                        return aVal.localeCompare(bVal) * multiplier;
+                    case 'assigned':
+                        aVal = (a.querySelector('.task-assigned-cell')?.textContent || '').toLowerCase();
+                        bVal = (b.querySelector('.task-assigned-cell')?.textContent || '').toLowerCase();
+                        return aVal.localeCompare(bVal) * multiplier;
+                    case 'created':
+                    case 'updated':
+                        aVal = (a.querySelector('.task-date-cell')?.textContent || '').toLowerCase();
+                        bVal = (b.querySelector('.task-date-cell')?.textContent || '').toLowerCase();
+                        return aVal.localeCompare(bVal) * multiplier;
+                    default:
+                        return 0;
+                }
+            });
+            
+            rows.forEach(row => tbody.appendChild(row));
+        });
+    });
+});
+</script>
+{% endblock %}

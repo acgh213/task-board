@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Agents — Command Center{% endblock %}
+
+{% block breadcrumbs %}
+<nav class="breadcrumbs">
+    <a href="/">Dashboard</a>
+    <span class="breadcrumb-sep">›</span>
+    <span>Agents</span>
+</nav>
+{% endblock %}
+
+{% block content %}
+<div class="dashboard-header">
+    <h1>Agent Roster</h1>
+</div>
+
+<div class="agents-section">
+    {% if agents %}
+    <div class="agent-list" id="agent-list">
+        {% for agent in agents %}
+        <a href="/agent/{{ agent.name }}" class="agent-card-link">
+            <div class="agent-card status-{{ agent.status }}">
+                <div class="agent-name">{{ agent.display_name }}</div>
+                <div class="agent-model">{{ agent.model }}</div>
+                <div class="agent-meta-row">
+                    <span class="role-badge">{{ agent.role }}</span>
+                    <span class="xp-badge">Lv.{{ agent.level }}</span>
+                </div>
+                <div class="agent-skills">
+                    {% for skill in agent.skills.split(',') if agent.skills %}
+                    <span class="skill-badge">{{ skill.strip() }}</span>
+                    {% endfor %}
+                    {% if not agent.skills %}
+                    <span class="skill-badge" style="opacity:0.4">no skills</span>
+                    {% endif %}
+                </div>
+                <div class="agent-stats">
+                    <span>✓ {{ agent.tasks_completed }}</span>
+                    <span>✗ {{ agent.tasks_failed }}</span>
+                    <span>★ {{ agent.reputation_score|round(1) }}</span>
+                    <span>⊞ {{ agent_loads.get(agent.name, 0) }}/{{ agent.max_concurrent }}</span>
+                    <span class="status-badge {{ agent.status }}">{{ agent.status }}</span>
+                </div>
+                <div class="agent-progress-row">
+                    <span class="xp-label">XP</span>
+                    <div class="xp-bar">
+                        <div class="xp-fill" style="width: {{ (agent.xp % 100) }}%"></div>
+                    </div>
+                    <span class="xp-value">{{ agent.xp }}</span>
+                </div>
+                <div class="agent-heartbeat">
+                    <span class="heartbeat-label">⏱ Last seen:</span>
+                    <span class="heartbeat-value {{ 'offline' if agent_heartbeat_ages.get(agent.name, 'Never') != 'Never' and agent_heartbeat_ages.get(agent.name, '')|int(default=0) > 300 else '' }}">
+                        {{ agent_heartbeat_ages.get(agent.name, 'Never') }}
+                    </span>
+                </div>
+            </div>
+        </a>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state">No agents registered yet. Deploy agents via the API to see them here.</div>
+    {% endif %}
+</div>
+{% endblock %}
