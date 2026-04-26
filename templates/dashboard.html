@@ -68,8 +68,41 @@
     </div>
 </div>
 
+<!-- Filter Bar -->
+<div class="filter-bar">
+    <div class="filter-group">
+        <label for="filter-status">Status</label>
+        <select id="filter-status" class="filter-select" onchange="applyFilters()">
+            <option value="">All Statuses</option>
+            {% for status in all_statuses %}
+            <option value="{{ status }}" {% if request.args.get('status') == status %}selected{% endif %}>{{ status|replace('_', ' ')|title }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="filter-group">
+        <label for="filter-agent">Agent</label>
+        <select id="filter-agent" class="filter-select" onchange="applyFilters()">
+            <option value="">All Agents</option>
+            {% for agent in agents %}
+            <option value="{{ agent.name }}" {% if request.args.get('agent') == agent.name %}selected{% endif %}>{{ agent.display_name }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="filter-group">
+        <label for="filter-project">Project</label>
+        <select id="filter-project" class="filter-select" onchange="applyFilters()">
+            <option value="">All Projects</option>
+            {% for project in all_projects %}
+            <option value="{{ project }}" {% if request.args.get('project') == project %}selected{% endif %}>{{ project }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <button class="filter-reset" onclick="resetFilters()">Reset</button>
+    <span class="auto-refresh-indicator" id="refresh-indicator">Auto-refreshing every 30s</span>
+</div>
+
 <!-- Kanban Board — 5 Grouped Columns for 15 Statuses -->
-<div class="board-columns">
+<div class="board-columns" id="kanban-board">
 
     <!-- Column 1: Pipeline Start -->
     <div class="column">
@@ -267,23 +300,25 @@
     <h2>🤖 Agents</h2>
     <div class="agent-list">
         {% for agent in agents %}
-        <div class="agent-card status-{{ agent.status }}">
-            <div class="agent-name">{{ agent.display_name }}</div>
-            <div class="agent-model">{{ agent.model }}</div>
-            <div class="agent-skills">
-                {% for skill in agent.skills.split(',') if agent.skills %}
-                <span class="skill-badge">{{ skill.strip() }}</span>
-                {% endfor %}
+        <a href="/agent/{{ agent.name }}" class="agent-card-link">
+            <div class="agent-card status-{{ agent.status }}">
+                <div class="agent-name">{{ agent.display_name }}</div>
+                <div class="agent-model">{{ agent.model }}</div>
+                <div class="agent-skills">
+                    {% for skill in agent.skills.split(',') if agent.skills %}
+                    <span class="skill-badge">{{ skill.strip() }}</span>
+                    {% endfor %}
+                </div>
+                <div class="agent-stats">
+                    <span>✅ {{ agent.tasks_completed }}</span>
+                    <span>❌ {{ agent.tasks_failed }}</span>
+                    <span>⭐ {{ agent.reputation_score|round(1) }}</span>
+                    <span>📊 {{ agent_loads.get(agent.name, 0) }}/{{ agent.max_concurrent }}</span>
+                    <span class="role-badge">{{ agent.role }}</span>
+                    <span class="status-badge {{ agent.status }}">{{ agent.status }}</span>
+                </div>
             </div>
-            <div class="agent-stats">
-                <span>✅ {{ agent.tasks_completed }}</span>
-                <span>❌ {{ agent.tasks_failed }}</span>
-                <span>⭐ {{ agent.reputation_score|round(1) }}</span>
-                <span>📊 {{ agent_loads.get(agent.name, 0) }}/{{ agent.max_concurrent }}</span>
-                <span class="role-badge">{{ agent.role }}</span>
-                <span class="status-badge {{ agent.status }}">{{ agent.status }}</span>
-            </div>
-        </div>
+        </a>
         {% endfor %}
     </div>
 </div>
@@ -291,7 +326,7 @@
 <!-- Recent Events Section -->
 <div class="events-section">
     <h2>📜 Recent Events</h2>
-    <div class="event-list">
+    <div class="event-list" id="event-list">
         {% for event in events %}
         <div class="event-item">
             <span class="event-type-badge event-{{ event.event_type }}">{{ event.event_type }}</span>
@@ -304,4 +339,83 @@
         {% endfor %}
     </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Auto-refresh every 30 seconds
+let refreshInterval = 30000;
+let refreshTimer = null;
+
+function startAutoRefresh() {
+    if (refreshTimer) clearInterval(refreshTimer);
+    refreshTimer = setInterval(refreshDashboard, refreshInterval);
+}
+
+function refreshDashboard() {
+    const indicator = document.getElementById('refresh-indicator');
+    if (indicator) indicator.textContent = 'Refreshing...';
+
+    fetch(window.location.href, {
+        headers: { 'X-Requested-With': 'XMLHttpRequest' }
+    })
+    .then(response => response.text())
+    .then(html => {
+        // Parse the new HTML and update the kanban board, agents, events sections
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(html, 'text/html');
+        
+        const newBoard = doc.getElementById('kanban-board');
+        const oldBoard = document.getElementById('kanban-board');
+        if (newBoard && oldBoard) {
+            oldBoard.innerHTML = newBoard.innerHTML;
+        }
+
+        const newAgents = doc.querySelector('.agent-list');
+        const oldAgents = document.querySelector('.agent-list');
+        if (newAgents && oldAgents) {
+            oldAgents.innerHTML = newAgents.innerHTML;
+        }
+
+        const newEvents = doc.querySelector('#event-list');
+        const oldEvents = document.querySelector('#event-list');
+        if (newEvents && oldEvents) {
+            oldEvents.innerHTML = newEvents.innerHTML;
+        }
+
+        const newStats = doc.querySelector('.stats-bar');
+        const oldStats = document.querySelector('.stats-bar');
+        if (newStats && oldStats) {
+            oldStats.innerHTML = newStats.innerHTML;
+        }
+
+        if (indicator) indicator.textContent = 'Auto-refreshing every 30s — Last updated: ' + new Date().toLocaleTimeString();
+    })
+    .catch(() => {
+        if (indicator) indicator.textContent = 'Refresh failed — will retry';
+    });
+}
+
+// Filter functions
+function applyFilters() {
+    const status = document.getElementById('filter-status').value;
+    const agent = document.getElementById('filter-agent').value;
+    const project = document.getElementById('filter-project').value;
+    
+    const params = new URLSearchParams();
+    if (status) params.set('status', status);
+    if (agent) params.set('agent', agent);
+    if (project) params.set('project', project);
+    
+    const qs = params.toString();
+    window.location.href = window.location.pathname + (qs ? '?' + qs : '');
+}
+
+function resetFilters() {
+    window.location.href = '/';
+}
+
+// Start auto-refresh on page load
+document.addEventListener('DOMContentLoaded', startAutoRefresh);
+</script>
 {% endblock %}

@@ -2,7 +2,7 @@
 import json
 from datetime import datetime, timezone
 from flask import Blueprint, request, jsonify
-from models import db, Task, Agent, Review, EventLog, STATE_TRANSITIONS
+from models import db, Task, TaskTemplate, Agent, Review, EventLog, STATE_TRANSITIONS
 from models import ESCALATION_TAGS_HUMAN, ESCALATION_TAGS_VESPER
 from config import Config
 
@@ -1130,3 +1130,102 @@ def overseer_dashboard():
         'recent_events': [e.to_dict() for e in recent_events],
         'checked_at': now.isoformat(),
     })
+
+
+# ── Templates ───────────────────────────────
+
+@api_bp.route('/templates', methods=['GET'])
+def list_templates():
+    """List all task templates."""
+    templates = TaskTemplate.query.all()
+    return jsonify({
+        'templates': [t.to_dict() for t in templates],
+        'total': len(templates),
+    })
+
+
+@api_bp.route('/templates/<name>/create', methods=['POST'])
+def create_from_template(name):
+    """Create tasks from a template, substituting variables in step titles/descriptions/tags."""
+    template = TaskTemplate.query.filter_by(name=name).first()
+    if not template:
+        return jsonify({'error': f'Template "{name}" not found'}), 404
+
+    data = request.get_json() or {}
+    variables = data.get('variables', {})
+    project = data.get('project', 'general')
+
+    steps = template.get_steps()
+    if not steps:
+        return jsonify({'error': 'Template has no steps'}), 400
+
+    created_tasks = []
+    step_id_map = {}  # step index -> task id for dependency tracking
+
+    for i, step in enumerate(steps):
+        title_template = step.get('title', '')
+        desc_template = step.get('description', '')
+        tags_template = step.get('tags', '')
+
+        # Variable substitution
+        title = _substitute_vars(title_template, variables)
+        description = _substitute_vars(desc_template, variables)
+        tags = _substitute_vars(tags_template, variables)
+
+        priority = step.get('priority', 3)
+        reserved_for = step.get('reserved_for', None) or step.get('agent', None)
+
+        task = Task(
+            title=title,
+            description=description,
+            priority=priority,
+            tags=tags,
+            project=project,
+            reserved_for=reserved_for,
+        )
+
+        # Check escalation tags
+        escalate_to = _check_escalation_tags(task)
+        if escalate_to:
+            task.status = escalate_to
+
+        db.session.add(task)
+        db.session.flush()
+
+        _log_event(task.id, 'task_created', details={
+            'title': title,
+            'tags': tags,
+            'status': task.status,
+            'template': name,
+            'step_index': i,
+        })
+
+        step_id_map[i] = task.id
+        created_tasks.append(task)
+
+    # Set up dependencies if any step has depends_on
+    for i, step in enumerate(steps):
+        depends_on = step.get('depends_on')
+        if depends_on is not None and depends_on in step_id_map:
+            parent_id = step_id_map[depends_on]
+            child_id = step_id_map[i]
+            _log_event(child_id, 'dependency_set', details={
+                'depends_on_task_id': parent_id,
+                'from_template': name,
+            })
+
+    db.session.commit()
+    return jsonify({
+        'template': name,
+        'created': len(created_tasks),
+        'tasks': [t.to_dict() for t in created_tasks],
+    }), 201
+
+
+def _substitute_vars(text, variables):
+    """Replace {var_name} placeholders with values from the variables dict."""
+    if not text:
+        return text
+    for key, value in variables.items():
+        text = text.replace(f'{{{key}}}', str(value))
+    return text

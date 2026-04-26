@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% block title %}{{ agent.display_name }} — Agent Details{% endblock %}
+
+{% block content %}
+<div class="agent-detail">
+    <div class="agent-detail-header">
+        <a href="/" class="back-link">← Back to Dashboard</a>
+        <div class="agent-detail-title-row">
+            <h1>{{ agent.display_name }}</h1>
+            <span class="status-badge large {{ agent.status }}">{{ agent.status }}</span>
+        </div>
+        <div class="agent-detail-meta">
+            <span class="agent-model">{{ agent.model }}</span>
+            <span class="role-badge">{{ agent.role }}</span>
+        </div>
+    </div>
+
+    <div class="agent-detail-grid">
+        <div class="detail-card">
+            <h3>Statistics</h3>
+            <div class="detail-row">
+                <span class="detail-label">Tasks Completed</span>
+                <span class="detail-value">✅ {{ agent.tasks_completed }}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Tasks Failed</span>
+                <span class="detail-value">❌ {{ agent.tasks_failed }}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Review Rejected</span>
+                <span class="detail-value">🔄 {{ agent.tasks_review_rejected }}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Timed Out</span>
+                <span class="detail-value">⏰ {{ agent.tasks_timed_out }}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Reputation</span>
+                <span class="detail-value">⭐ {{ agent.reputation_score|round(1) }}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Load</span>
+                <span class="detail-value">{{ agent_load }}/{{ agent.max_concurrent }}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Last Heartbeat</span>
+                <span class="detail-value">{{ agent.last_heartbeat.strftime('%Y-%m-%d %H:%M:%S') if agent.last_heartbeat else 'Never' }}</span>
+            </div>
+        </div>
+
+        <div class="detail-card">
+            <h3>Skills & Projects</h3>
+            <div class="detail-row">
+                <span class="detail-label">Skills</span>
+            </div>
+            <div class="agent-skills">
+                {% for skill in agent.skills.split(',') if agent.skills %}
+                <span class="skill-badge">{{ skill.strip() }}</span>
+                {% endfor %}
+                {% if not agent.skills %}<span class="detail-value">—</span>{% endif %}
+            </div>
+            <div class="detail-row" style="margin-top:12px;">
+                <span class="detail-label">Preferred Projects</span>
+            </div>
+            <div style="margin-top:4px;">
+                {% for p in agent.preferred_projects.split(',') if agent.preferred_projects %}
+                <span class="skill-badge">{{ p.strip() }}</span>
+                {% endfor %}
+                {% if not agent.preferred_projects %}<span class="detail-value">—</span>{% endif %}
+            </div>
+        </div>
+
+        <div class="detail-card">
+            <h3>Current Status</h3>
+            {% if current_task %}
+            <div class="detail-row">
+                <span class="detail-label">Working On</span>
+                <span class="detail-value"><a href="/task/{{ current_task.id }}">{{ current_task.title }}</a></span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Status</span>
+                <span class="detail-value">{{ current_task.status }}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Since</span>
+                <span class="detail-value">{{ current_task.in_progress_at.strftime('%Y-%m-%d %H:%M:%S') if current_task.in_progress_at else '—' }}</span>
+            </div>
+            {% else %}
+            <div class="detail-row">
+                <span class="detail-value">No active task</span>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Task History -->
+    <div class="detail-card">
+        <h3>Task History ({{ tasks|length }})</h3>
+        <div class="agent-task-list">
+            {% for task in tasks %}
+            <a href="/task/{{ task.id }}" class="task-card priority-{{ task.priority }}">
+                <div class="task-title">{{ task.title }}</div>
+                <div class="task-meta">
+                    <span class="priority priority-{{ task.priority }}">P{{ task.priority }}</span>
+                    <span class="status-badge {{ task.status }}">{{ task.status }}</span>
+                    <span class="project">{{ task.project }}</span>
+                </div>
+                <div class="task-time">{{ task.created_at.strftime('%Y-%m-%d %H:%M') if task.created_at else '' }}</div>
+            </a>
+            {% else %}
+            <div class="empty-state">No tasks found for this agent</div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- Recent Agent Events -->
+    {% if events %}
+    <div class="detail-card">
+        <h3>Recent Events ({{ events|length }})</h3>
+        <div class="event-list">
+            {% for event in events %}
+            <div class="event-item">
+                <span class="event-type-badge event-{{ event.event_type }}">{{ event.event_type }}</span>
+                <span class="event-task-ref">#{{ event.task_id }}</span>
+                <span class="event-time">{{ event.created_at.strftime('%Y-%m-%d %H:%M:%S') if event.created_at else '' }}</span>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

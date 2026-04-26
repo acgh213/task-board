@@ -224,6 +224,32 @@ class EventLog(db.Model):
 
 
 # ──────────────────────────────────────────────
+# TaskTemplate Model
+# ──────────────────────────────────────────────
+class TaskTemplate(db.Model):
+    __tablename__ = 'task_templates'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), unique=True, nullable=False)
+    description = db.Column(db.Text, default='')
+    steps = db.Column(db.Text, default='[]')  # JSON array of step definitions
+    created_at = db.Column(db.DateTime, default=utcnow)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'description': self.description,
+            'steps': json.loads(self.steps) if self.steps else [],
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+
+    def get_steps(self):
+        """Parse and return the steps JSON."""
+        return json.loads(self.steps) if self.steps else []
+
+
+# ──────────────────────────────────────────────
 # Agent Model
 # ──────────────────────────────────────────────
 class Agent(db.Model):
