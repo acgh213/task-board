@@ -1,0 +1,25 @@
+# Database
+instance/*.db
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Testing
+.pytest_cache/
+.coverage
+
+# Environment
+.env
+venv/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
