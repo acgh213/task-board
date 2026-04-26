@@ -112,6 +112,94 @@ class TestTaskAPI:
         assert resp.status_code == 404
 
 
+class TestPagination:
+    def test_pagination_defaults(self, client):
+        """Default per_page=50, returns total count."""
+        for i in range(60):
+            client.post('/api/tasks', json={'title': f'Task {i}'})
+        resp = client.get('/api/tasks')
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert len(data['tasks']) == 50
+        assert data['total'] == 60
+        assert data['page'] == 1
+        assert data['per_page'] == 50
+
+    def test_pagination_custom_page_and_per_page(self, client):
+        for i in range(30):
+            client.post('/api/tasks', json={'title': f'Task {i}'})
+        # Page 2 with 10 per page
+        resp = client.get('/api/tasks?page=2&per_page=10')
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert len(data['tasks']) == 10
+        assert data['total'] == 30
+        assert data['page'] == 2
+        assert data['per_page'] == 10
+        # Verify it's the second batch: task titles start at index 10
+        titles = [t['title'] for t in data['tasks']]
+        assert titles == [f'Task {i}' for i in range(10, 20)]
+
+    def test_pagination_with_filters(self, client):
+        client.post('/api/tasks', json={'title': 'Alpha', 'status': 'pending'})
+        for i in range(5):
+            resp = client.post('/api/tasks', json={'title': f'Beta {i}'})
+            tid = resp.get_json()['id']
+            client.post(f'/api/tasks/{tid}/claim', json={'agent': 'coder'})
+            client.post(f'/api/tasks/{tid}/complete', json={'result': 'done'})
+        client.post('/api/tasks', json={'title': 'Gamma', 'status': 'pending'})
+
+        # Filter by status=completed, paginated
+        resp = client.get('/api/tasks?status=completed&per_page=2')
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert len(data['tasks']) == 2
+        assert data['total'] == 5
+        assert all(t['status'] == 'completed' for t in data['tasks'])
+
+    def test_pagination_out_of_bounds(self, client):
+        client.post('/api/tasks', json={'title': 'Only one'})
+        resp = client.get('/api/tasks?page=100&per_page=10')
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert len(data['tasks']) == 0
+        assert data['total'] == 1
+        assert data['page'] == 100
+
+    def test_pagination_negative_values_use_defaults(self, client):
+        client.post('/api/tasks', json={'title': 'Task'})
+        resp = client.get('/api/tasks?page=-1&per_page=-5')
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data['page'] == 1
+        assert data['per_page'] == 50
+        assert len(data['tasks']) == 1
+
+    def test_pagination_non_integer_params_use_defaults(self, client):
+        client.post('/api/tasks', json={'title': 'Task'})
+        resp = client.get('/api/tasks?page=abc&per_page=xyz')
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data['page'] == 1
+        assert data['per_page'] == 50
+
+    def test_pagination_with_zero_per_page_uses_default(self, client):
+        client.post('/api/tasks', json={'title': 'Task'})
+        resp = client.get('/api/tasks?page=1&per_page=0')
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data['per_page'] == 50
+
+    def test_pagination_combines_with_other_filters(self, client):
+        client.post('/api/tasks', json={'title': 'Alpha', 'project': 'proj1'})
+        client.post('/api/tasks', json={'title': 'Beta', 'project': 'proj2'})
+        client.post('/api/tasks', json={'title': 'Gamma', 'project': 'proj1'})
+        resp = client.get('/api/tasks?project=proj1&per_page=1&page=1')
+        data = resp.get_json()
+        assert len(data['tasks']) == 1
+        assert data['total'] == 2
+
+
 class TestAgentAPI:
     def test_list_agents(self, client):
         resp = client.get('/api/agents')

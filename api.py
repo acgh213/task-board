@@ -22,9 +22,31 @@ def list_tasks():
     if tag:
         query = query.filter(Task.tags.contains(tag))
 
+    total = query.count()
+
+    # Parse pagination params with sensible defaults
+    try:
+        page = int(request.args.get('page', 1))
+    except (ValueError, TypeError):
+        page = 1
+    try:
+        per_page = int(request.args.get('per_page', 50))
+    except (ValueError, TypeError):
+        per_page = 50
+
+    if page < 1:
+        page = 1
+    if per_page < 1:
+        per_page = 50
+
     query = query.order_by(Task.priority, Task.created_at)
-    tasks = query.all()
-    return jsonify({'tasks': [t.to_dict() for t in tasks]})
+    tasks = query.offset((page - 1) * per_page).limit(per_page).all()
+    return jsonify({
+        'tasks': [t.to_dict() for t in tasks],
+        'total': total,
+        'page': page,
+        'per_page': per_page,
+    })
 
 
 @api_bp.route('/tasks', methods=['POST'])
