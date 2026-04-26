@@ -12,6 +12,10 @@ def create_app(testing=False):
 
     with app.app_context():
         db.create_all()
+        # Enable WAL mode for concurrent reads + busy timeout for write contention
+        db.session.execute(db.text('PRAGMA journal_mode=WAL'))
+        db.session.execute(db.text('PRAGMA busy_timeout=5000'))
+        db.session.commit()
 
     # Auth middleware — check X-ExeDev-Email header
     @app.before_request

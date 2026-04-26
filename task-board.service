@@ -1,6 +1,8 @@
 [Unit]
 Description=Hermes Task Board
 After=network.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -8,8 +10,16 @@ User=exedev
 WorkingDirectory=/home/exedev/task-board
 ExecStart=/home/exedev/venv/bin/python run.py
 Restart=always
-RestartSec=5
+RestartSec=10
 Environment=PORT=8893
+# SQLite WAL mode needs single writer — limit concurrency
+LimitNOFILE=65536
+# OOM protection
+OOMScoreAdjust=-100
+# Graceful shutdown
+TimeoutStopSec=30
+KillMode=mixed
+KillSignal=SIGTERM
 
 [Install]
 WantedBy=multi-user.target
