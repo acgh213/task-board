@@ -1,188 +1,246 @@
-# Task Board
+# Hermes Vesper
 
-An autonomous task orchestration system for AI agents. Agents get assigned work based on skills, claim it, execute it, and report back — all governed by a state machine with review pipelines, timeout recovery, and full audit logging.
+A self-hosted task board for coordinating small AI crews.
 
-## What It Does
+This repo is not trying to be a grand unified agent platform. It is a Flask app with a real state machine, audit trails, handoffs, reviews, a sci-fi dashboard, and enough operational scar tissue to be interesting.
 
-Task Board is a self-managing coordination layer for multi-agent AI workflows. Instead of manually dispatching work, you create tasks and let the system route them to the right agents automatically.
+Built by Cassie Gray, with Vesper doing what she does best: taste, pressure, continuity, and refusing to let the system lie about itself.
 
-**Core capabilities:**
-- **Skill-based auto-assignment** — tasks route to agents based on tag/skill matching, priority, and reputation
-- **15-state lifecycle** — pending → assigned → claimed → in_progress → submitted → in_review → completed, with side paths for failures, escalations, and timeouts
-- **Review pipeline** — work doesn't count as done until a reviewer approves it
-- **Lease/heartbeat system** — agents hold tasks with time-limited leases; stale work gets reclaimed
-- **Event logging** — every action creates an audit trail
-- **Agent reputation** — tracks completions, failures, timeouts, and review rejects
-- **Task templates** — pre-defined workflows (feature-build, bug-fix, documentation) with variable substitution
-- **Escalation rules** — tasks with dangerous tags (deploy, credentials, payment) auto-escalate to human review
+---
+
+## What it is
+
+Hermes Vesper sits between a human operator and a set of role-based agents.
+
+You create tasks. The system can triage or auto-assign them. Agents claim work, heartbeat while working, submit results, hand off to each other, and send work into review before it counts as done.
+
+It is meant to make multi-agent work *visible*.
+Not magical. Visible.
+
+### What exists today
+
+- 15-state task lifecycle, including review, escalation, timeout, release, and dead-end states
+- Role-based agent registry with skills, XP, badges, reputation, streaks, and editable metadata
+- Agent-to-agent handoffs with accept/reject flow and audit history
+- Review pipeline with `approve`, `reject`, and `request_changes`
+- No-self-review enforcement
+- Workflow audit endpoint and dedicated audit page
+- Dashboard with kanban board, telemetry panels, leaderboard, activity feed, and command palette
+- Socket.IO-backed live updates for dashboard views
+- Optional triage queue for tasks that should start under human review
+- Template/workflow support, including DAG-style template coverage in tests
+- Overseer endpoints and cron script for timeout cleanup / reassignment safety-net behavior
+
+### What it is *not*
+
+- Not a guaranteed fully autonomous shop with zero supervision
+- Not a polished SaaS product
+- Not honest if the docs pretend every optional automation path is always turned on in every deployment
+
+---
+
+## Current operational truth
+
+As of this docs pass, the repo itself supports the following and the test suite collects **361 tests**.
+
+A few important truth-not-marketing notes:
+
+- New tasks do **not** always start in triage. By default they start `pending` unless you set `start_in_triage=true` or the task escalates on creation.
+- The Overseer exists as API endpoints plus `overseer_cron.py`. Whether it is actually running is a deployment decision, not something the code can morally promise from inside a README.
+- Agent naming has been cleaned up toward **role-based ids**, not branded substrate names.
+- The dashboard aesthetic is intentionally space-station melodrama. The operational layer underneath is still plain Flask + SQLite + SQLAlchemy.
+
+---
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────┐
-│                  Task Board                       │
-│                                                   │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐       │
-│  │  Tasks   │  │  Agents  │  │ Reviews  │       │
-│  │ (15 states)│ │ (skills) │  │ (feedback)│      │
-│  └────┬─────┘  └────┬─────┘  └────┬─────┘       │
-│       │              │              │              │
-│  ┌────┴──────────────┴──────────────┴────┐       │
-│  │           State Machine                │       │
-│  │  claim → start → submit → review       │       │
-│  │  timeout → reclaim → reassign          │       │
-│  │  escalate → human → resolve            │       │
-│  └────────────────────────────────────────┘       │
-│                                                   │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐       │
-│  │ Event Log│  │Templates │  │Overseer  │       │
-│  │ (audit)  │  │ (workflows)│ │(cron 2m) │       │
-│  └──────────┘  └──────────┘  └──────────┘       │
-└─────────────────────────────────────────────────┘
-         ↑                ↑
-    ┌────┴────┐     ┌────┴────┐
-    │  Coder  │     │Researcher│
-    │ Editor  │     │ Planner  │
-    │ Writer  │     │   QA     │
-    │ DevOps  │     │Reviewer  │
-    └─────────┘     └──────────┘
+```text
+Browser UI (dashboard, task detail, agent pages, stats)
+        │
+        ├── Flask routes (`app.py`)
+        ├── REST API (`api.py`)
+        ├── Socket.IO live updates (`ws.py`)
+        │
+        └── SQLAlchemy models (`models.py`)
+                │
+                └── SQLite database (WAL enabled)
 ```
 
-## API Reference
+### Main moving pieces
 
-All endpoints require `X-ExeDev-Email` header (except `/health`).
+- **Tasks** — lifecycle state, assignment, claims, heartbeats, reviews, dependencies, attempts
+- **Agents** — role identity, display name, skills, status, reputation, XP, level, badges
+- **Reviews** — quality gate before completion
+- **Handoffs** — structured transfer between agents
+- **Event log** — audit trail for the whole mess
+- **Templates** — reusable workflow/task generation
+- **Overseer** — timeout detection, reclaim/reassign behavior, auto-triage/auto-assign helpers
+
+---
+
+## State machine
+
+```text
+pending → assigned → claimed → in_progress → submitted → in_review → completed
+            │            │            │             │
+            │            │            │             ├── request_changes → needs_revision
+            │            │            │             └── reject → failed
+            │            │            └── release / timeout paths
+            │            └── release
+            └── reassignment / triage / escalation side paths
+```
+
+Additional states in use:
+
+- `triage`
+- `blocked`
+- `needs_human`
+- `needs_vesper`
+- `timed_out`
+- `released`
+- `dead`
+
+---
+
+## UI surface
+
+The dashboard is not shy about itself. It currently includes:
+
+- dark neon command-center styling
+- multi-column kanban board
+- telemetry cards for throughput, success rate, average completion time, and agent utilization
+- leaderboard and badge display
+- recent event feed / ship log
+- crew-station agent cards
+- `Cmd+K` command palette
+- responsive nav with hamburger menu
+- dedicated task audit and timeline views
+
+If you want beige enterprise minimalism, this is the wrong ship.
+
+---
+
+## API quick reference
+
+All authenticated endpoints require the `X-ExeDev-Email` header. `/health` is public.
 
 ### Tasks
+- `POST /api/tasks`
+- `GET /api/tasks`
+- `GET /api/tasks/<id>`
+- `DELETE /api/tasks/<id>`
+- `POST /api/tasks/<id>/assign`
+- `POST /api/tasks/<id>/claim`
+- `POST /api/tasks/<id>/start`
+- `POST /api/tasks/<id>/submit`
+- `POST /api/tasks/<id>/heartbeat`
+- `POST /api/tasks/<id>/release`
+- `POST /api/tasks/<id>/review`
+- `POST /api/tasks/<id>/escalate`
+- `POST /api/tasks/<id>/resolve`
+- `GET /api/tasks/<id>/audit`
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/api/tasks` | List tasks. Filters: `?status=&agent=&project=&tag=&page=&per_page=` |
-| `POST` | `/api/tasks` | Create task. Body: `{title, description, priority, tags, project, reserved_for}` |
-| `GET` | `/api/tasks/<id>` | Get task details |
-| `DELETE` | `/api/tasks/<id>` | Delete task |
+### Handoffs
+- `POST /api/tasks/<id>/handoff`
+- `POST /api/tasks/<id>/handoff/<rid>/accept`
+- `POST /api/tasks/<id>/handoff/<rid>/reject`
 
-### Lifecycle
+### Triage / overseer
+- `GET /api/tasks/triage`
+- `POST /api/tasks/<id>/triage/accept`
+- `POST /api/overseer/auto-triage`
+- `POST /api/overseer/auto-assign`
+- `GET /api/overseer/pending-for-agent/<name>`
+- `POST /api/overseer/check-timeouts`
+- `POST /api/overseer/reclaim-timeouts`
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/api/tasks/<id>/assign` | Mission Control assigns agent |
-| `POST` | `/api/tasks/<id>/claim` | Agent claims task |
-| `POST` | `/api/tasks/<id>/start` | Agent starts work |
-| `POST` | `/api/tasks/<id>/submit` | Agent submits result |
-| `POST` | `/api/tasks/<id>/heartbeat` | Extend lease |
-| `POST` | `/api/tasks/<id>/release` | Release claim |
+### Agents / stats
+- `GET /api/agents`
+- `POST /api/agents`
+- `GET /api/agents/discover`
+- `GET /api/agents/<name>/xp`
+- `POST /api/agents/xp/leaderboard`
+- `GET /api/agents/<name>/badges`
+- `GET /api/agents/<name>/card`
+- `GET /api/stats`
+- `GET /api/telemetry`
 
-### Review
+---
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/api/tasks/<id>/review` | `{reviewer, decision: approve/reject/request_changes, feedback}` |
-| `POST` | `/api/tasks/<id>/escalate` | `{target: needs_human/needs_vesper, reason}` |
-| `POST` | `/api/tasks/<id>/resolve` | `{decision: approve/reject/reassign/release}` |
+## Running locally
 
-### Overseer
+### Prerequisites
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/api/overseer/auto-assign` | Scan pending tasks, match to agents, assign |
-| `GET` | `/api/overseer/pending-for-agent/<name>` | Tasks matching agent's skills |
-| `POST` | `/api/overseer/reclaim-timeouts` | Check timed-out tasks |
-| `POST` | `/api/overseer/check-timeouts` | Transition expired leases to timed_out |
-| `GET` | `/api/overseer/dashboard` | Summary stats |
+- Python 3.11+
+- `pip`
 
-### Templates
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/api/templates` | List available templates |
-| `POST` | `/api/templates/<name>/create` | Create tasks from template. Body: `{variables: {topic: "..."}}` |
-
-### Agents & Events
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/api/agents` | List agents with stats |
-| `POST` | `/api/agents` | Register/update agent |
-| `GET` | `/api/tasks/<id>/events` | Task event history |
-| `GET` | `/api/events` | Global event log |
-| `GET` | `/api/stats` | Aggregate statistics |
-
-## Task Lifecycle
-
-```
-pending ──→ assigned ──→ claimed ──→ in_progress ──→ submitted ──→ in_review ──→ completed
-                                    │                  │              │
-                                    ↓                  ↓              ↓
-                                 released          needs_revision  failed
-                                    │                  │              │
-                                    ↓                  ↓              ↓
-                                 pending            claimed        released/dead
-```
-
-**Side paths:** `blocked`, `needs_human`, `needs_vesper`, `timed_out`, `dead`
-
-## Running Locally
+### Install
 
 ```bash
 git clone https://github.com/acgh213/task-board.git
 cd task-board
-python3 -m venv venv && source venv/bin/activate
+python3 -m venv venv
+source venv/bin/activate
 pip install -r requirements.txt
-python run.py  # Port 8893
 ```
 
-### Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PORT` | `8893` | Server port |
-| `DATABASE_URL` | `sqlite:///instance/task_board.db` | Database URL |
-| `FLASK_DEBUG` | (unset) | Enable debug mode |
-| `SECRET_KEY` | `dev-key-change-in-prod` | Flask secret key |
-
-### Systemd
+### Run
 
 ```bash
-sudo cp task-board.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now task-board
+python run.py
+# default local port: http://localhost:8893
 ```
 
-### Tests
+### Test
 
 ```bash
-pytest  # 141 tests
+pytest -q
 ```
 
-## Task Templates
+### Optional automation
 
-Create multi-step workflows from templates:
+You can run agent polling and overseer behavior separately if you actually want the system moving on its own:
 
 ```bash
-# Create a feature-build workflow
-curl -X POST http://localhost:8893/api/templates/feature-build/create \
-  -H "Content-Type: application/json" \
-  -d '{"variables": {"topic": "user authentication"}}'
-# Creates 6 tasks: research → plan → implement → test → review → document
+python poll_daemon.py --agent coder --interval 15
+python overseer_cron.py
 ```
 
-**Available templates:**
-- `feature-build` — 6 steps: research, plan, implement, test, review, document
-- `bug-fix` — 4 steps: investigate, write failing test, fix, verify
-- `documentation` — 3 steps: research, write, review
+That is the honest version: autonomy here is composed out of app + agents + automation processes, not summoned by vibes alone.
 
-## Dashboard
+---
 
-The web dashboard at `/` shows:
-- **Kanban board** with all 15 task statuses
-- **Agent cards** with skills, reputation, and current load
-- **Recent events** feed
-- **Filter controls** by status, agent, and project
-- **Auto-refresh** every 30 seconds
+## Repo landmarks
 
-Individual pages:
-- `/task/<id>` — task timeline, reviews, events
-- `/agent/<name>` — agent history, reputation, active tasks
+- `app.py` — Flask app and HTML routes
+- `api.py` — task/agent/review/handoff/overseer API
+- `models.py` — SQLAlchemy models and state definitions
+- `templates/` — dashboard and detail pages
+- `static/style.css` — the command-center look
+- `poll_daemon.py` — agent polling worker
+- `overseer_cron.py` — safety-net automation runner
+- `tests/` — 361 collected tests
+- `docs/vision.md` — roadmap / system intent, now separated from README truth claims
+
+---
+
+## Philosophy
+
+Agent systems should be legible.
+
+If tasks move, you should be able to see why.
+If an agent fails, you should be able to inspect the trail.
+If a dashboard looks gorgeous but lies about live state, it is decoration, not instrumentation.
+
+This repo is at its best when it behaves like a real operations surface: stylish, yes, but answerable.
+
+---
+
+## Credits
+
+Designed and directed by **Cassie Gray**.
+
+Built with help from Vesper and a rotating cast of agents, clones, reviewers, and other small digital coworkers of varying reliability.
 
 ## License
 

@@ -94,6 +94,37 @@ class TestHandoffAccept:
         assert data['handoff']['status'] == 'accepted'
         assert data['task']['assigned_to'] == 'editor'
 
+    def test_accept_handoff_resets_releasing_agent_to_idle_when_no_active_work(self, client, app):
+        """Accepting a handoff should clear the source agent's stale busy status."""
+        resp = client.post('/api/tasks', json={'title': 'Handoff status cleanup'})
+        task_id = resp.get_json()['id']
+
+        client.post(f'/api/tasks/{task_id}/assign', json={'agent': 'coder'})
+        client.post(f'/api/tasks/{task_id}/claim', json={'agent': 'coder'})
+
+        with app.app_context():
+            coder = db.session.get(Agent, 'coder')
+            assert coder.status == 'busy'
+
+        resp = client.post(f'/api/tasks/{task_id}/handoff', json={
+            'from_agent': 'coder',
+            'to_agent': 'editor',
+            'message': 'Take over',
+        })
+        request_id = resp.get_json()['id']
+
+        resp = client.post(f'/api/tasks/{task_id}/handoff/{request_id}/accept')
+        assert resp.status_code == 200
+
+        with app.app_context():
+            coder = db.session.get(Agent, 'coder')
+            editor = db.session.get(Agent, 'editor')
+            task = db.session.get(Task, task_id)
+            assert coder.status == 'idle'
+            assert editor is not None
+            assert task.assigned_to == 'editor'
+            assert task.claimed_by is None
+
     def test_accept_wrong_task_handoff_fails(self, client):
         """Accepting a handoff for a different task should fail."""
         resp1 = client.post('/api/tasks', json={'title': 'Task 1'})

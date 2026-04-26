@@ -68,6 +68,27 @@ def _get_agent_or_create(name, display_name=None, model=None):
     return agent
 
 
+def _sync_agent_status(agent_name, now=None):
+    """Refresh an agent's idle/busy status from live active task ownership."""
+    if not agent_name:
+        return None
+
+    agent = db.session.get(Agent, agent_name)
+    if agent is None or agent.status == 'offline':
+        return agent
+
+    active_states = ('assigned', 'claimed', 'in_progress', 'submitted', 'in_review', 'needs_revision')
+    active_count = Task.query.filter(
+        ((Task.claimed_by == agent_name) | (Task.assigned_to == agent_name)),
+        Task.status.in_(active_states),
+    ).count()
+
+    agent.status = 'busy' if active_count > 0 else 'idle'
+    if now is not None:
+        agent.last_heartbeat = now
+    return agent
+
+
 def _validate_transition(task, new_status):
     """Validate that a state transition is allowed. Returns (ok, error_msg)."""
     if task.status == new_status:
@@ -2556,6 +2577,9 @@ def accept_handoff(task_id, request_id):
 
     # Create agent for to_agent if needed
     _get_agent_or_create(handoff.to_agent)
+    db.session.flush()
+    _sync_agent_status(handoff.from_agent, now)
+    _sync_agent_status(handoff.to_agent, now)
 
     _log_event(task.id, 'handoff_accepted', agent=handoff.to_agent, details={
         'from_agent': handoff.from_agent,
@@ -2565,6 +2589,12 @@ def accept_handoff(task_id, request_id):
 
     db.session.commit()
     _emit_task_update(task)
+    from_agent = db.session.get(Agent, handoff.from_agent)
+    if from_agent:
+        _emit_agent_update(from_agent)
+    to_agent = db.session.get(Agent, handoff.to_agent)
+    if to_agent:
+        _emit_agent_update(to_agent)
     return jsonify({
         'handoff': handoff.to_dict(),
         'task': task.to_dict(),
